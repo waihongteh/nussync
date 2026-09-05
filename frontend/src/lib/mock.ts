@@ -8,13 +8,23 @@
 import type {
   Announcement,
   AppAPI,
+  AskResult,
   Course,
   Deadline,
+  FeedItem,
   FileNode,
+  Flashcard,
   Grade,
+  Overview,
+  Question,
+  Quiz,
+  QuizAttempt,
+  ScoreStats,
   SearchHit,
   Settings,
   Stats,
+  StudyJob,
+  StudyStatus,
   SyncStatus,
   TelegramStatus,
 } from './types';
@@ -156,6 +166,7 @@ function buildNode(spec: FileSpec, courseID: number, parentRel: string, root: st
     Source: spec.source ?? (spec.module ? 'modules' : 'files'),
     Module: spec.module ?? '',
     Synced: spec.synced !== false,
+    IsNew: false,
     Children: null,
   };
   if (isDir) {
@@ -335,7 +346,9 @@ const SNIPPETS = [
 
 // ---------------------------------------------------------------- deadlines
 
-const DEADLINES: Deadline[] = [
+type DeadlineSeed = Omit<Deadline, 'Description' | 'SubmissionTypes' | 'Attachments' | 'Score' | 'Graded' | 'Stats'>;
+
+const DEADLINE_SEEDS: DeadlineSeed[] = [
   {
     ID: 501,
     CourseID: 2,
@@ -426,6 +439,17 @@ const DEADLINES: Deadline[] = [
   },
 ];
 
+/** GetDeadlines returns the plain rows; detail fields stay zero-valued. */
+const DEADLINES: Deadline[] = DEADLINE_SEEDS.map((d) => ({
+  ...d,
+  Description: '',
+  SubmissionTypes: null,
+  Attachments: null,
+  Score: 0,
+  Graded: false,
+  Stats: null,
+}));
+
 // ------------------------------------------------------------ announcements
 
 const ANNOUNCEMENTS: Announcement[] = [
@@ -498,7 +522,9 @@ const ANNOUNCEMENTS: Announcement[] = [
 
 // ---------------------------------------------------------------- grades
 
-const GRADES: Grade[] = [
+type GradeSeed = Omit<Grade, 'Mean'>;
+
+const GRADE_SEEDS: GradeSeed[] = [
   { CourseCode: 'CS4246', Title: 'Quiz 1 — MDP Basics', Score: 9, Possible: 10, GradedAt: iso(-28 * DAY), URL: 'https://canvas.nus.edu.sg/courses/1/grades' },
   { CourseCode: 'CS4246', Title: 'Quiz 2 — Dynamic Programming', Score: 7.5, Possible: 10, GradedAt: iso(-14 * DAY), URL: 'https://canvas.nus.edu.sg/courses/1/grades' },
   { CourseCode: 'CS4246', Title: 'Programming Assignment 1', Score: 36, Possible: 40, GradedAt: iso(-9 * DAY), URL: 'https://canvas.nus.edu.sg/courses/1/grades' },
@@ -510,6 +536,19 @@ const GRADES: Grade[] = [
   { CourseCode: 'NST2030', Title: 'Reflection Essay', Score: 13, Possible: 20, GradedAt: iso(-5 * DAY), URL: 'https://canvas.nus.edu.sg/courses/4/grades' },
   { CourseCode: 'CP4101', Title: 'Project Proposal', Score: 18, Possible: 20, GradedAt: iso(-31 * DAY), URL: 'https://canvas.nus.edu.sg/courses/5/grades' },
 ];
+
+/** Means are filled opportunistically by GetDeadlineDetail — some are still 0. */
+const GRADE_MEANS: Record<string, number> = {
+  'Quiz 1 — MDP Basics': 7.8,
+  'Quiz 2 — Dynamic Programming': 7.9,
+  'Programming Assignment 1': 31.4,
+  'Homework 1': 14.2,
+  'Midterm Test': 38.6,
+  'Problem Set 2': 20.1,
+  'Reflection Essay': 14.8,
+};
+
+const GRADES: Grade[] = GRADE_SEEDS.map((g) => ({ ...g, Mean: GRADE_MEANS[g.Title] ?? 0 }));
 
 // ---------------------------------------------------------------- settings
 
@@ -525,7 +564,9 @@ let settings: Settings = {
   SyncIntervalMin: 60,
   NotifyAnnouncements: true,
   NotifyGrades: true,
+  NotifyDesktop: true,
   LaunchAtLogin: false,
+  Hotkey: 'ctrl+shift+n',
   Theme: 'system',
 };
 
@@ -626,6 +667,660 @@ function runFakeSync() {
     localEmitter.emit('toast', { Level: 'success', Message: `Sync complete — ${total} files up to date` });
   });
 }
+
+// ---------------------------------------------------------------- feed
+
+/** When the user last opened the What's-new feed. */
+let feedSeenAt = now - 2.5 * DAY;
+
+/** Files re-downloaded because Canvas reported a change (vs. brand new). */
+const UPDATED_NAMES = new Set([
+  'Tutorial 2 Solutions.pdf',
+  'PS3.pdf',
+  'Formula Sheet.pdf',
+  'Supervisor Notes.docx',
+]);
+
+/** Rows that predate the feature never appear in the feed. */
+const FEED_HORIZON = 30 * DAY;
+
+function feedEligible(f: FileNode): boolean {
+  return !f.IsDir && f.Synced && now - Date.parse(f.ModifiedAt) <= FEED_HORIZON;
+}
+
+/** Re-stamp FileNode.IsNew across every tree after the seen marker moves. */
+function refreshIsNew(): void {
+  const walk = (nodes: FileNode[]) => {
+    for (const n of nodes) {
+      if (n.IsDir) walk(n.Children ?? []);
+      else n.IsNew = feedEligible(n) && Date.parse(n.ModifiedAt) > feedSeenAt;
+    }
+  };
+  for (const list of Object.values(TREES)) walk(list);
+}
+
+refreshIsNew();
+
+function unseenCount(): number {
+  return ALL_FILES.filter((f) => f.IsNew).length;
+}
+
+function toFeedItem(f: FileNode): FeedItem {
+  return {
+    ID: f.ID,
+    CourseID: f.CourseID,
+    CourseCode: courseByID(f.CourseID)?.Code ?? '',
+    Name: f.Name,
+    Path: f.Path,
+    RelPath: f.RelPath,
+    Size: f.Size,
+    ChangedAt: f.ModifiedAt,
+    Kind: UPDATED_NAMES.has(f.Name) ? 'updated' : 'new',
+    Module: f.Module,
+  };
+}
+
+// ------------------------------------------------------- deadline detail
+
+interface DetailSeed {
+  Description: string;
+  SubmissionTypes: string[];
+  attachmentNames?: string[];
+  Score?: number;
+  Graded?: boolean;
+  Stats?: ScoreStats;
+}
+
+const DEADLINE_DETAILS: Record<number, DetailSeed> = {
+  501: {
+    Description:
+      '<p>Work through the duality material from <strong>Chapters 3 and 4</strong>. Submit a single PDF.</p>' +
+      '<ol><li>Derive the Lagrangian dual of the given QP.</li>' +
+      '<li>State the KKT conditions and verify Slater&rsquo;s condition holds.</li>' +
+      '<li>Show that strong duality gives a zero duality gap here.</li></ol>' +
+      '<p>Late submissions incur <em>10% per day</em>, capped at three days.</p>',
+    SubmissionTypes: ['online_upload'],
+    attachmentNames: ['HW2.pdf', 'Ch4 KKT Conditions.pdf'],
+    Score: 14,
+    Graded: true,
+    Stats: { Mean: 13.1, Min: 4, Max: 20, Median: 13.5, Count: 118 },
+  },
+  502: {
+    Description:
+      '<p>A short online quiz on <strong>temporal difference learning</strong>. You get one attempt and 25 minutes.</p>' +
+      '<ul><li>Covers TD(0), SARSA and Q-learning.</li><li>Open notes, no collaboration.</li></ul>',
+    SubmissionTypes: ['online_quiz'],
+    attachmentNames: ['L04 Monte Carlo and TD Learning.pdf'],
+  },
+  503: {
+    Description:
+      '<p>Submit the interim report using the revised template (the one with the <strong>risk register</strong> section).</p>' +
+      '<p>Page limit is <strong>12 pages excluding references</strong>.</p>',
+    SubmissionTypes: ['online_upload'],
+    attachmentNames: ['Interim Report v3.docx', 'FYP Guidelines AY2526.pdf'],
+    Score: 86,
+    Graded: true,
+    Stats: { Mean: 78.4, Min: 52, Max: 96, Median: 79, Count: 41 },
+  },
+  505: {
+    Description:
+      '<p>Implement a <strong>DQN</strong> agent for <em>LunarLander-v2</em>. Starter code is in ' +
+      '<code>pa2_starter.zip</code>.</p><ul><li>Replay buffer and target network are both required.</li>' +
+      '<li>Report mean return over 100 evaluation episodes.</li>' +
+      '<li>Training takes roughly 40 minutes on CPU — start early.</li></ul>',
+    SubmissionTypes: ['online_upload', 'online_text_entry'],
+    attachmentNames: ['PA2 Handout.pdf', 'pa2_starter.zip'],
+  },
+  504: {
+    Description:
+      '<p>Questions 1&ndash;5 of Problem Set 3. Note the corrected boundary condition in Q4(b): <em>u(0, t) = 0</em>.</p>',
+    SubmissionTypes: ['online_upload'],
+    attachmentNames: ['PS3.pdf'],
+  },
+};
+
+function fileByName(name: string): FileNode | undefined {
+  return ALL_FILES.find((f) => f.Name === name);
+}
+
+// ------------------------------------------------------------------ study
+
+const STUDY_STATUS: StudyStatus = {
+  CLIFound: true,
+  Version: '2.0.31 (Claude Code)',
+  LoggedIn: true,
+  Error: '',
+  Models: ['opus', 'sonnet', 'haiku'],
+};
+
+let jobSeq = 0;
+let quizSeq = 100;
+let questionSeq = 1000;
+let cardSeq = 5000;
+
+const JOBS: StudyJob[] = [];
+const OVERVIEWS = new Map<number, Overview>();
+const QUIZZES: Quiz[] = [];
+const ATTEMPTS: QuizAttempt[] = [];
+const ASKS: Array<AskResult & { fileIDs: number[] }> = [];
+const CARDS: Flashcard[] = [];
+
+const jobTimers = new Map<string, Array<ReturnType<typeof setTimeout>>>();
+
+function emitJob(j: StudyJob) {
+  localEmitter.emit('study:job', { ...j });
+}
+
+const PROGRESS_LINES: Record<string, string[]> = {
+  overview: ['Reading the file…', 'Extracting section structure…', 'Summarising key ideas…', 'Writing the overview…'],
+  quiz: ['Reading the file…', 'Picking examinable concepts…', 'Drafting questions…', 'Checking answers and page refs…'],
+  ask: ['Reading the file…', 'Locating the relevant passages…', 'Composing an answer…'],
+  flashcards: ['Reading the file…', 'Selecting atomic facts…', 'Writing card fronts and backs…'],
+};
+
+/**
+ * Fake ~5s job: queued -> running with live progress lines -> done. `finish`
+ * writes the result into the cache and returns the toast message.
+ */
+function startJob(kind: string, fileIDs: number[], model: string, finish: () => string): string {
+  const id = `job-${++jobSeq}`;
+  const job: StudyJob = {
+    ID: id,
+    Kind: kind,
+    FileIDs: [...fileIDs],
+    Status: 'queued',
+    Progress: 'Queued',
+    Error: '',
+    StartedAt: new Date().toISOString(),
+    FinishedAt: '',
+    Model: model || 'sonnet',
+    CostUSD: 0,
+  };
+  JOBS.unshift(job);
+  const timers: Array<ReturnType<typeof setTimeout>> = [];
+  jobTimers.set(id, timers);
+  const at = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
+
+  emitJob(job);
+
+  const lines = PROGRESS_LINES[kind] ?? PROGRESS_LINES.overview;
+  at(180, () => {
+    job.Status = 'running';
+    job.Progress = lines[0];
+    emitJob(job);
+    localEmitter.emit('study:progress', { JobID: id, Text: lines[0] });
+  });
+
+  lines.slice(1).forEach((line, i) => {
+    at(900 + i * 1150, () => {
+      job.Progress = line;
+      emitJob(job);
+      localEmitter.emit('study:progress', { JobID: id, Text: line });
+    });
+  });
+
+  at(5000, () => {
+    let message: string;
+    try {
+      message = finish();
+    } catch (err) {
+      job.Status = 'error';
+      job.Error = err instanceof Error ? err.message : String(err);
+      job.FinishedAt = new Date().toISOString();
+      emitJob(job);
+      localEmitter.emit('toast', { Level: 'error', Message: `Study job failed: ${job.Error}` });
+      jobTimers.delete(id);
+      return;
+    }
+    job.Status = 'done';
+    job.Progress = 'Done';
+    job.FinishedAt = new Date().toISOString();
+    job.CostUSD = Math.round((0.02 + Math.random() * 0.09) * 1000) / 1000;
+    emitJob(job);
+    localEmitter.emit('toast', { Level: 'success', Message: message });
+    jobTimers.delete(id);
+  });
+
+  return id;
+}
+
+// ------------------------------------------------------- generated content
+
+const OVERVIEW_BODIES: Record<number, string> = {
+  1: [
+    '# {name}',
+    '',
+    '## What this covers',
+    'This deck develops **sequential decision making** under uncertainty. The through-line',
+    'is that a policy is only as good as the value function you can estimate for it.',
+    '',
+    '## Key ideas',
+    '- A *Markov decision process* is the tuple `(S, A, P, R, gamma)`.',
+    "- The **Bellman optimality equation** ties a state's value to its successors.",
+    '- Policy iteration alternates *evaluation* and *improvement*; value iteration folds the two together.',
+    '- Discounting with gamma < 1 keeps infinite-horizon returns bounded.',
+    '',
+    '## Worth memorising',
+    "1. `V*(s) = max_a sum P(s'|s,a) [ R(s,a,s') + gamma V*(s') ]`",
+    '2. Contraction mapping means value iteration converges geometrically.',
+    '3. Greedy improvement over an exact `V^pi` never makes the policy worse.',
+    '',
+    '## Where students slip',
+    'Confusing the *state* value `V` with the *action* value `Q`, and forgetting that policy',
+    'improvement needs the **full** expectation, not a single sampled successor.',
+  ].join('\n'),
+  2: [
+    '# {name}',
+    '',
+    '## What this covers',
+    'Constrained optimisation, from **convexity** through to the KKT conditions.',
+    '',
+    '## Key ideas',
+    '- A set is convex when every chord between two of its points stays inside it.',
+    '- The *Lagrangian* is `L(x, lam, nu) = f(x) + sum lam_i g_i(x) + sum nu_j h_j(x)`.',
+    '- Weak duality always holds; **strong duality** needs a constraint qualification.',
+    "- Under **Slater's condition** the KKT conditions are necessary *and* sufficient.",
+    '',
+    '## Worth memorising',
+    '1. Stationarity, primal feasibility, dual feasibility, complementary slackness.',
+    '2. `lam_i >= 0` for inequality multipliers, unrestricted sign for equalities.',
+    '3. A zero duality gap certifies optimality without re-solving the primal.',
+    '',
+    '## Where students slip',
+    'Writing complementary slackness as `lam_i = 0` *and* `g_i(x) = 0` rather than the',
+    'product being zero.',
+  ].join('\n'),
+  3: [
+    '# {name}',
+    '',
+    '## What this covers',
+    'Transform methods for linear PDEs and the boundary-value problems they solve.',
+    '',
+    '## Key ideas',
+    '- **Fourier series** decompose a periodic signal onto an orthogonal basis.',
+    '- The transform pair swaps differentiation for multiplication by `i*omega`.',
+    "- *Green's functions* express a solution as a convolution with the impulse response.",
+    '- Boundary conditions pick out which eigenfunctions survive.',
+    '',
+    '## Worth memorising',
+    '1. Parseval: energy is preserved between the time and frequency domains.',
+    '2. Convolution in one domain is multiplication in the other.',
+    '3. A Sturm-Liouville operator has real eigenvalues and orthogonal eigenfunctions.',
+    '',
+    '## Where students slip',
+    'Dropping the `1/2pi` normalisation, and applying the boundary condition *after*',
+    'transforming rather than before.',
+  ].join('\n'),
+};
+
+const GENERIC_OVERVIEW = [
+  '# {name}',
+  '',
+  '## What this covers',
+  'A working summary of the material in this file, at the level the assessment expects.',
+  '',
+  '## Key ideas',
+  '- The main argument is developed in stages; each section builds on the last.',
+  '- Definitions come first, then the results that depend on them.',
+  '- Worked examples show the method rather than just the answer.',
+  '',
+  '## Worth memorising',
+  '1. The definitions introduced early — everything later leans on them.',
+  '2. The two or three results that are quoted repeatedly.',
+  '3. The conditions under which each result actually applies.',
+  '',
+  '## Where students slip',
+  'Learning the statement of a result without its hypotheses, then applying it where the',
+  'hypotheses fail.',
+].join('\n');
+
+function makeOverview(fileID: number, model: string): Overview {
+  const f = ALL_FILES.find((x) => x.ID === fileID);
+  const body = (OVERVIEW_BODIES[f?.CourseID ?? 0] ?? GENERIC_OVERVIEW).replace(
+    /\{name\}/g,
+    f?.Name.replace(/\.[a-z0-9]+$/i, '') ?? 'This file',
+  );
+  return { FileID: fileID, Markdown: body, CreatedAt: new Date().toISOString(), Model: model || 'sonnet' };
+}
+
+type QSeed = Omit<Question, 'ID'>;
+
+const QUESTION_BANK: Record<number, QSeed[]> = {
+  1: [
+    {
+      Type: 'mcq',
+      Prompt: 'In an MDP, what does the discount factor gamma control?',
+      Options: [
+        'How much future rewards are worth relative to immediate ones',
+        'The probability of transitioning to a terminal state',
+        'The learning rate of the value update',
+        'The exploration/exploitation trade-off',
+      ],
+      Answer: 'A',
+      Explanation:
+        'Gamma weights rewards by how far in the future they arrive; gamma < 1 also keeps the infinite-horizon return finite.',
+      Page: 7,
+    },
+    {
+      Type: 'mcq',
+      Prompt: 'Value iteration converges because the Bellman optimality operator is…',
+      Options: ['Linear', 'A contraction mapping in the sup-norm', 'Idempotent', 'Monotone but not bounded'],
+      Answer: 'B',
+      Explanation:
+        'It contracts with modulus gamma, so the Banach fixed-point theorem gives a unique V* and geometric convergence.',
+      Page: 21,
+    },
+    {
+      Type: 'mcq',
+      Prompt: 'Which update rule is off-policy?',
+      Options: ['SARSA', 'TD(0) policy evaluation', 'Q-learning', 'Monte Carlo first-visit'],
+      Answer: 'C',
+      Explanation:
+        'Q-learning bootstraps from max_a Q(s2,a) regardless of the action actually taken, so it learns the greedy policy while behaving otherwise.',
+      Page: 14,
+    },
+    {
+      Type: 'mcq',
+      Prompt: 'What problem does a target network in DQN address?',
+      Options: [
+        'Exploding gradients from large rewards',
+        'Correlated samples within a minibatch',
+        'A moving regression target destabilising training',
+        'Overestimation caused by function approximation',
+      ],
+      Answer: 'C',
+      Explanation: 'Freezing the bootstrap target for several thousand steps stops the network chasing its own predictions.',
+      Page: 32,
+    },
+    {
+      Type: 'short',
+      Prompt: 'State the Bellman optimality equation for V*.',
+      Options: null,
+      Answer: "V*(s) = max_a sum_{s'} P(s'|s,a) [ R(s,a,s') + gamma V*(s') ]",
+      Explanation: 'The value of a state under the optimal policy is the best expected one-step reward plus discounted successor value.',
+      Page: 9,
+    },
+    {
+      Type: 'short',
+      Prompt: 'Why does experience replay help a DQN agent?',
+      Options: null,
+      Answer:
+        'It breaks the temporal correlation between consecutive samples and reuses each transition many times, which makes the gradient estimates closer to i.i.d. and far more sample-efficient.',
+      Explanation: 'Without replay the network sees a highly correlated stream and tends to forget earlier parts of the state space.',
+      Page: 34,
+    },
+  ],
+  2: [
+    {
+      Type: 'mcq',
+      Prompt: 'Which condition guarantees strong duality for a convex program?',
+      Options: [
+        'Linear independence of the constraint gradients',
+        "Slater's condition",
+        'Compactness of the feasible set',
+        'Differentiability of the objective',
+      ],
+      Answer: 'B',
+      Explanation: 'A strictly feasible point for the inequality constraints is enough for a zero duality gap in a convex problem.',
+      Page: 12,
+    },
+    {
+      Type: 'mcq',
+      Prompt: 'Complementary slackness says that at an optimum…',
+      Options: [
+        'lam_i = 0 for every i',
+        'g_i(x) = 0 for every i',
+        'lam_i * g_i(x) = 0 for every i',
+        'lam_i + g_i(x) = 0 for every i',
+      ],
+      Answer: 'C',
+      Explanation: 'Either the constraint is active or its multiplier vanishes — the product, not each factor, is zero.',
+      Page: 18,
+    },
+    {
+      Type: 'mcq',
+      Prompt: 'A function is convex if and only if its epigraph is…',
+      Options: ['Closed', 'Bounded', 'A convex set', 'A cone'],
+      Answer: 'C',
+      Explanation: 'Convexity of the epigraph is the geometric restatement of the analytic inequality.',
+      Page: 4,
+    },
+    {
+      Type: 'mcq',
+      Prompt: 'For a twice-differentiable f on an open convex domain, convexity is equivalent to…',
+      Options: ['grad f(x) = 0 somewhere', 'Hessian positive semidefinite everywhere', 'Hessian positive definite everywhere', 'f bounded below'],
+      Answer: 'B',
+      Explanation:
+        'A positive semidefinite Hessian on the whole domain characterises convexity; strict definiteness gives strict convexity but is not necessary.',
+      Page: 6,
+    },
+    {
+      Type: 'short',
+      Prompt: 'List the four KKT conditions.',
+      Options: null,
+      Answer: 'Stationarity of the Lagrangian, primal feasibility, dual feasibility (multipliers >= 0), and complementary slackness.',
+      Explanation: 'Under a constraint qualification these are necessary; for a convex problem they are also sufficient.',
+      Page: 19,
+    },
+  ],
+  3: [
+    {
+      Type: 'mcq',
+      Prompt: 'Under the Fourier transform, differentiation in time becomes…',
+      Options: ['Division by i*omega', 'Multiplication by i*omega', 'Convolution with a step', 'Multiplication by omega squared'],
+      Answer: 'B',
+      Explanation: 'That is exactly why transforms turn linear constant-coefficient ODEs into algebra.',
+      Page: 11,
+    },
+    {
+      Type: 'mcq',
+      Prompt: "A Green's function is the response of the operator to…",
+      Options: ['A sinusoid', 'A unit impulse', 'A step input', 'Homogeneous boundary data'],
+      Answer: 'B',
+      Explanation: 'Linearity then gives the general solution as a convolution of the source with the impulse response.',
+      Page: 24,
+    },
+    {
+      Type: 'mcq',
+      Prompt: 'Eigenfunctions of a regular Sturm-Liouville problem are…',
+      Options: ['Always polynomials', 'Orthogonal with respect to the weight function', 'Never unique', 'Complex-valued in general'],
+      Answer: 'B',
+      Explanation: 'Self-adjointness gives real eigenvalues and a weighted-orthogonal eigenbasis.',
+      Page: 16,
+    },
+    {
+      Type: 'short',
+      Prompt: "State Parseval's theorem in words.",
+      Options: null,
+      Answer:
+        'The total energy of a signal computed in the time domain equals the total energy of its transform in the frequency domain, up to the chosen normalisation constant.',
+      Explanation: 'It follows from the transform being a unitary map on L-squared.',
+      Page: 13,
+    },
+  ],
+};
+
+const GENERIC_QUESTIONS: QSeed[] = [
+  {
+    Type: 'mcq',
+    Prompt: 'What is the stated purpose of this document?',
+    Options: [
+      'To set out the material and how it will be assessed',
+      'To replace the lectures entirely',
+      'To collect past exam papers',
+      'To record attendance',
+    ],
+    Answer: 'A',
+    Explanation: 'The opening section frames the scope and the assessment that follows from it.',
+    Page: 1,
+  },
+  {
+    Type: 'mcq',
+    Prompt: 'Which section introduces the definitions the rest of the file depends on?',
+    Options: ['The appendix', 'The first substantive section', 'The reference list', 'The summary'],
+    Answer: 'B',
+    Explanation: 'Definitions are established before any result that uses them.',
+    Page: 2,
+  },
+  {
+    Type: 'short',
+    Prompt: 'Summarise the main argument of this file in two sentences.',
+    Options: null,
+    Answer:
+      'The file introduces its core definitions, then develops the results that follow from them, closing with worked examples that show the method in use.',
+    Explanation: 'A good summary names the definitions, the results and the worked method.',
+    Page: 1,
+  },
+];
+
+function makeQuiz(fileIDs: number[], model: string, n: number): Quiz {
+  const count = n > 0 ? Math.min(n, 50) : 5;
+  const files = fileIDs.map((id) => ALL_FILES.find((f) => f.ID === id)).filter(Boolean) as FileNode[];
+  const pool: QSeed[] = [];
+  const seen = new Set<number>();
+  for (const f of files) {
+    if (seen.has(f.CourseID)) continue;
+    seen.add(f.CourseID);
+    pool.push(...(QUESTION_BANK[f.CourseID] ?? []));
+  }
+  pool.push(...GENERIC_QUESTIONS);
+
+  const questions: Question[] = [];
+  for (let i = 0; i < count; i++) {
+    questions.push({ ...pool[i % pool.length], ID: ++questionSeq });
+  }
+  const title =
+    files.length === 1
+      ? files[0].Name.replace(/\.[a-z0-9]+$/i, '')
+      : `${files.length} files · ${courseByID(files[0]?.CourseID ?? 0)?.Code ?? 'Mixed'}`;
+  return {
+    ID: ++quizSeq,
+    FileIDs: [...fileIDs],
+    Title: `${title} — ${count} questions`,
+    CreatedAt: new Date().toISOString(),
+    Model: model || 'sonnet',
+    Questions: questions,
+  };
+}
+
+const CARD_BANK: Record<number, Array<[string, string]>> = {
+  1: [
+    ['Markov property', 'The next state depends only on the current state and action, not on the history that led there.'],
+    ['Policy pi', 'A mapping from states to a distribution over actions.'],
+    ['Return G_t', 'The discounted sum of future rewards from time t onwards.'],
+    ['On-policy vs off-policy', 'On-policy learns the value of the behaviour policy; off-policy learns about a different target policy.'],
+    ['Bootstrapping', 'Updating an estimate using another estimate rather than a full sampled return.'],
+    ['Epsilon-greedy', 'Take the greedy action with probability 1 - epsilon, otherwise act uniformly at random.'],
+  ],
+  2: [
+    ['Convex set', 'Every convex combination of two points in the set is also in the set.'],
+    ['Lagrangian', 'The objective augmented with weighted constraints: f(x) + sum lam_i g_i(x) + sum nu_j h_j(x).'],
+    ['Weak duality', 'The dual optimum is always at most the primal optimum, for any problem.'],
+    ['Duality gap', 'Primal optimum minus dual optimum; zero under strong duality.'],
+    ["Slater's condition", 'A strictly feasible point exists for the inequality constraints of a convex problem.'],
+    ['Complementary slackness', 'lam_i * g_i(x*) = 0 for every inequality constraint at an optimum.'],
+  ],
+  3: [
+    ['Fourier series', 'Expansion of a periodic function onto an orthogonal basis of sines and cosines.'],
+    ['Convolution theorem', 'Convolution in one domain equals pointwise multiplication in the other.'],
+    ["Green's function", 'The response of a linear operator to a unit impulse, with the given boundary conditions.'],
+    ['Parseval', 'Energy is conserved between a signal and its transform.'],
+    ['Sturm-Liouville', 'A self-adjoint second-order operator with real eigenvalues and orthogonal eigenfunctions.'],
+  ],
+};
+
+const GENERIC_CARDS: Array<[string, string]> = [
+  ['Core definition', 'The term this file introduces first, and the property that makes it useful.'],
+  ['Main result', 'The statement that the rest of the file relies on, together with its hypotheses.'],
+  ['Common mistake', 'Applying the main result outside the conditions under which it holds.'],
+];
+
+function makeCards(fileID: number, n: number): Flashcard[] {
+  const f = ALL_FILES.find((x) => x.ID === fileID);
+  const pool = CARD_BANK[f?.CourseID ?? 0] ?? GENERIC_CARDS;
+  const count = n > 0 ? Math.min(n, 100) : Math.min(pool.length, 20);
+  const out: Flashcard[] = [];
+  for (let i = 0; i < count; i++) {
+    const pair = pool[i % pool.length];
+    out.push({
+      ID: ++cardSeq,
+      FileID: fileID,
+      Front: pair[0],
+      Back: pair[1],
+      Due: new Date(now - 60_000).toISOString(),
+      Interval: 0,
+      Ease: 2.5,
+    });
+  }
+  return out;
+}
+
+function makeAsk(fileIDs: number[], question: string): AskResult & { fileIDs: number[] } {
+  const files = fileIDs.map((id) => ALL_FILES.find((f) => f.ID === id)).filter(Boolean) as FileNode[];
+  const cites = files.slice(0, 3).map((f, i) => `${f.Name} · p.${8 + i * 7}`);
+  return {
+    fileIDs: [...fileIDs],
+    Question: question,
+    Answer: [
+      'Short answer: **yes, with one caveat**.',
+      '',
+      'The material defines the object first and only then states the result, so the hypotheses',
+      'matter as much as the conclusion. In the notes this is developed in three steps:',
+      '',
+      '- the definition is given in its most general form;',
+      '- a *special case* is worked through in full;',
+      '- the general statement is then proved by reducing to that case.',
+      '',
+      'The caveat is that the reduction needs the regularity assumption stated earlier — drop it',
+      'and the second step no longer applies.',
+    ].join('\n'),
+    Citations: cites.length ? cites : ['No files selected'],
+    CreatedAt: new Date().toISOString(),
+  };
+}
+
+/** Normalise an MCQ answer the way the backend does: "b", "B)" and the option text all work. */
+function normaliseMCQ(given: string, q: Question): string {
+  const g = (given ?? '').trim();
+  if (!g) return '';
+  const letter = /^([A-Za-z])[).\s]*$/.exec(g);
+  if (letter) return letter[1].toUpperCase();
+  const idx = (q.Options ?? []).findIndex((o) => o.trim().toLowerCase() === g.toLowerCase());
+  if (idx >= 0) return String.fromCharCode(65 + idx);
+  return g.toUpperCase();
+}
+
+// --- pre-seeded cache, so the Study tabs and Quiz Rush are not empty on load
+
+(function seedStudy() {
+  const seeds: Array<[string, number]> = [
+    ['L02 Markov Decision Processes.pdf', 6],
+    ['Ch4 KKT Conditions.pdf', 5],
+    ['PS3.pdf', 4],
+  ];
+  seeds.forEach(([name, n], i) => {
+    const f = fileByName(name);
+    if (!f) return;
+    const q = makeQuiz([f.ID], 'sonnet', n);
+    q.CreatedAt = new Date(now - (i + 1) * 2 * HOUR).toISOString();
+    QUIZZES.unshift(q);
+  });
+  const l02 = fileByName('L02 Markov Decision Processes.pdf');
+  if (l02) {
+    OVERVIEWS.set(l02.ID, { ...makeOverview(l02.ID, 'sonnet'), CreatedAt: new Date(now - 3 * HOUR).toISOString() });
+    CARDS.push(...makeCards(l02.ID, 6));
+    const oldest = QUIZZES[QUIZZES.length - 1];
+    if (oldest) {
+      ATTEMPTS.push({
+        QuizID: oldest.ID,
+        Answers: {},
+        Score: 4,
+        Total: (oldest.Questions ?? []).length,
+        TakenAt: new Date(now - 26 * HOUR).toISOString(),
+      });
+    }
+  }
+})();
 
 // ---------------------------------------------------------------- the mock
 
@@ -769,5 +1464,224 @@ export const mockAPI: AppAPI = {
       Deadlines: DEADLINES.filter((d) => !d.Submitted && Date.parse(d.DueAt) > Date.now()).length,
       LastSync: status.LastRun,
     };
+  },
+// ------------------------------------------------------------ what's new
+
+  GetWhatsNew: async (sinceDays) => {
+    await delay(null, 90);
+    const days = sinceDays > 0 ? sinceDays : 7;
+    const cutoff = now - days * DAY;
+    return ALL_FILES.filter((f) => feedEligible(f) && Date.parse(f.ModifiedAt) >= cutoff)
+      .sort((a, b) => Date.parse(b.ModifiedAt) - Date.parse(a.ModifiedAt))
+      .map(toFeedItem);
+  },
+
+  MarkFeedSeen: async () => {
+    feedSeenAt = Date.now();
+    refreshIsNew();
+    await delay(null, 40);
+    localEmitter.emit('feed:updated', 0);
+  },
+
+  GetUnseenCount: async () => {
+    await delay(null, 30);
+    return unseenCount();
+  },
+
+  // ------------------------------------------------------- deadline detail
+
+  GetDeadlineDetail: async (id) => {
+    await delay(null, 260);
+    const base = DEADLINES.find((d) => d.ID === id);
+    if (!base) throw new Error(`No deadline with id ${id}`);
+    const seed = DEADLINE_DETAILS[id];
+    if (!seed) {
+      // Canvas unreachable and nothing cached: the plain row, not an error.
+      return { ...base };
+    }
+    const attachments = (seed.attachmentNames ?? [])
+      .map((n) => fileByName(n))
+      .filter(Boolean) as FileNode[];
+    const detail: Deadline = {
+      ...base,
+      Description: seed.Description,
+      SubmissionTypes: [...seed.SubmissionTypes],
+      Attachments: attachments.map((f) => ({ ...f })),
+      Score: seed.Score ?? 0,
+      Graded: seed.Graded ?? false,
+      Stats: seed.Stats ? { ...seed.Stats } : null,
+    };
+    // The backend caches the mean onto the matching Grade row opportunistically.
+    if (detail.Stats) {
+      const g = GRADES.find((x) => x.Title === base.Title);
+      if (g && !g.Mean) g.Mean = detail.Stats.Mean;
+    }
+    return detail;
+  },
+
+  // ------------------------------------------------------- window control
+
+  ShowWindow: async () => {},
+  HideWindow: async () => {},
+  ToggleWindow: async () => {},
+
+  // ----------------------------------------------------------------- study
+
+  GetStudyStatus: async () => {
+    await delay(null, 120);
+    return { ...STUDY_STATUS, Models: [...(STUDY_STATUS.Models ?? [])] };
+  },
+
+  StartOverview: async (fileID, model) => {
+    await delay(null, 40);
+    return startJob('overview', [fileID], model, () => {
+      OVERVIEWS.set(fileID, makeOverview(fileID, model));
+      const f = ALL_FILES.find((x) => x.ID === fileID);
+      return `Overview ready — ${f?.Name ?? 'file'}`;
+    });
+  },
+
+  GetOverview: async (fileID) => {
+    await delay(null, 60);
+    const o = OVERVIEWS.get(fileID);
+    return o ? { ...o } : { FileID: 0, Markdown: '', CreatedAt: '', Model: '' };
+  },
+
+  StartQuiz: async (fileIDs, model, n) => {
+    await delay(null, 40);
+    return startJob('quiz', fileIDs, model, () => {
+      const q = makeQuiz(fileIDs, model, n);
+      QUIZZES.unshift(q);
+      return `Quiz ready — ${(q.Questions ?? []).length} questions`;
+    });
+  },
+
+  GetQuizzes: async (fileID) => {
+    await delay(null, 70);
+    const list = fileID ? QUIZZES.filter((q) => (q.FileIDs ?? []).includes(fileID)) : QUIZZES;
+    return list.map((q) => ({ ...q, Questions: (q.Questions ?? []).map((x) => ({ ...x })) }));
+  },
+
+  GetQuiz: async (id) => {
+    await delay(null, 60);
+    const q = QUIZZES.find((x) => x.ID === id);
+    if (!q) throw new Error(`No quiz with id ${id}`);
+    return { ...q, Questions: (q.Questions ?? []).map((x) => ({ ...x })) };
+  },
+
+  SubmitQuizAttempt: async (a) => {
+    await delay(null, 150);
+    const quiz = QUIZZES.find((x) => x.ID === a.QuizID);
+    const questions = quiz?.Questions ?? [];
+    let score = 0;
+    for (const q of questions) {
+      const given = a.Answers?.[q.ID] ?? '';
+      if (!given) continue;
+      if (q.Type === 'short') {
+        // Self-marked: the UI passes "correct" or "wrong".
+        if (given.trim().toLowerCase() === 'correct') score += 1;
+      } else if (normaliseMCQ(given, q) === q.Answer.trim().toUpperCase()) {
+        score += 1;
+      }
+    }
+    const graded: QuizAttempt = {
+      QuizID: a.QuizID,
+      Answers: { ...(a.Answers ?? {}) },
+      Score: score,
+      Total: questions.length,
+      TakenAt: new Date().toISOString(),
+    };
+    ATTEMPTS.unshift(graded);
+    return { ...graded };
+  },
+
+  GetQuizAttempts: async (quizID) => {
+    await delay(null, 60);
+    return ATTEMPTS.filter((x) => x.QuizID === quizID)
+      .sort((a, b) => Date.parse(b.TakenAt) - Date.parse(a.TakenAt))
+      .map((x) => ({ ...x }));
+  },
+
+  StartAsk: async (fileIDs, question, model) => {
+    await delay(null, 40);
+    return startJob('ask', fileIDs, model, () => {
+      ASKS.unshift(makeAsk(fileIDs, question));
+      return 'Answer ready';
+    });
+  },
+
+  GetAsks: async (fileID) => {
+    await delay(null, 60);
+    const list = fileID ? ASKS.filter((a) => a.fileIDs.includes(fileID)) : ASKS;
+    return list.map(({ fileIDs: _ids, ...rest }) => ({ ...rest, Citations: [...(rest.Citations ?? [])] }));
+  },
+
+  StartFlashcards: async (fileID, model, n) => {
+    await delay(null, 40);
+    return startJob('flashcards', [fileID], model, () => {
+      const cards = makeCards(fileID, n);
+      CARDS.push(...cards);
+      return `${cards.length} flashcards ready`;
+    });
+  },
+
+  GetDueFlashcards: async (limit) => {
+    await delay(null, 70);
+    const t = Date.now();
+    return CARDS.filter((c) => Date.parse(c.Due) <= t)
+      .sort((a, b) => Date.parse(a.Due) - Date.parse(b.Due))
+      .slice(0, limit > 0 ? limit : 50)
+      .map((c) => ({ ...c }));
+  },
+
+  ReviewFlashcard: async (id, grade) => {
+    await delay(null, 50);
+    const c = CARDS.find((x) => x.ID === id);
+    if (!c) return;
+    // SM-2 lite, same shape as the Go side.
+    if (grade <= 0) {
+      c.Interval = 0;
+      c.Ease = Math.max(1.3, c.Ease - 0.2);
+      c.Due = new Date(Date.now() + 60_000).toISOString();
+      return;
+    }
+    const factor = grade === 1 ? 1.2 : grade === 2 ? c.Ease : c.Ease * 1.3;
+    c.Interval = c.Interval === 0 ? (grade === 1 ? 1 : grade === 2 ? 2 : 4) : Math.round(c.Interval * factor);
+    c.Ease = Math.max(1.3, c.Ease + (grade === 1 ? -0.15 : grade === 3 ? 0.15 : 0));
+    c.Due = new Date(Date.now() + c.Interval * DAY).toISOString();
+  },
+
+  GetStudyJob: async (id) => {
+    await delay(null, 30);
+    const j = JOBS.find((x) => x.ID === id);
+    if (!j) throw new Error(`No job ${id}`);
+    return { ...j };
+  },
+
+  GetStudyJobs: async () => {
+    await delay(null, 50);
+    return JOBS.slice(0, 20).map((j) => ({ ...j }));
+  },
+
+  CancelStudyJob: async (id) => {
+    const timers = jobTimers.get(id) ?? [];
+    timers.forEach(clearTimeout);
+    jobTimers.delete(id);
+    const j = JOBS.find((x) => x.ID === id);
+    if (j && (j.Status === 'queued' || j.Status === 'running')) {
+      j.Status = 'cancelled';
+      j.Progress = 'Cancelled';
+      j.FinishedAt = new Date().toISOString();
+      emitJob(j);
+      localEmitter.emit('toast', { Level: 'info', Message: 'Study job cancelled' });
+    }
+    await delay(null, 30);
+  },
+
+  GetFilePageCount: async (fileID) => {
+    await delay(null, 240);
+    const f = ALL_FILES.find((x) => x.ID === fileID);
+    if (!f || !/\.pdf$/i.test(f.Name)) return 0;
+    return Math.max(4, Math.round(f.Size / 78_000));
   },
 };

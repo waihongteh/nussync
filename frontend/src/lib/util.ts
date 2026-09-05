@@ -313,3 +313,122 @@ export function parseDurLabel(s: string): string | null {
   if (unit === 'd') return `${n * 24}h`;
   return `${n}${unit}`;
 }
+
+/**
+ * Minimal, deliberately paranoid Markdown renderer for model-generated text
+ * (study overviews and answers). Everything is HTML-escaped first, so no tag
+ * in the source can survive; only the handful of constructs below are then
+ * re-enabled. Supports headings, bold, italics, inline code, fenced code,
+ * bullet and numbered lists, blockquotes and paragraphs — nothing else.
+ */
+export function markdownToHTML(md: string): string {
+  if (!md) return '';
+
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  // Inline spans, applied to already-escaped text.
+  const inline = (s: string) =>
+    s
+      .replace(/`([^`]+)`/g, (_m, c) => `<code>${c}</code>`)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+      .replace(/(^|[\s(])_([^_\n]+)_/g, '$1<em>$2</em>');
+
+  const lines = md.replace(/\r\n?/g, '\n').split('\n');
+  const out: string[] = [];
+  let listTag: 'ul' | 'ol' | null = null;
+  let para: string[] = [];
+  let inCode = false;
+  let code: string[] = [];
+
+  const closeList = () => {
+    if (listTag) {
+      out.push(`</${listTag}>`);
+      listTag = null;
+    }
+  };
+
+  const closePara = () => {
+    if (para.length) {
+      out.push(`<p>${inline(para.join(' '))}</p>`);
+      para = [];
+    }
+  };
+
+  const flush = () => {
+    closePara();
+    closeList();
+  };
+
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, '');
+
+    if (/^\s*```/.test(line)) {
+      if (inCode) {
+        out.push(`<pre><code>${code.join('\n')}</code></pre>`);
+        code = [];
+        inCode = false;
+      } else {
+        flush();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) {
+      code.push(esc(raw));
+      continue;
+    }
+
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      flush();
+      const level = Math.min(6, heading[1].length);
+      out.push(`<h${level}>${inline(esc(heading[2]))}</h${level}>`);
+      continue;
+    }
+
+    const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
+    if (bullet) {
+      closePara();
+      if (listTag !== 'ul') {
+        closeList();
+        out.push('<ul>');
+        listTag = 'ul';
+      }
+      out.push(`<li>${inline(esc(bullet[1]))}</li>`);
+      continue;
+    }
+
+    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    if (numbered) {
+      closePara();
+      if (listTag !== 'ol') {
+        closeList();
+        out.push('<ol>');
+        listTag = 'ol';
+      }
+      out.push(`<li>${inline(esc(numbered[1]))}</li>`);
+      continue;
+    }
+
+    const quote = /^\s*>\s?(.*)$/.exec(line);
+    if (quote) {
+      flush();
+      out.push(`<blockquote>${inline(esc(quote[1]))}</blockquote>`);
+      continue;
+    }
+
+    closeList();
+    para.push(esc(line.trim()));
+  }
+
+  if (inCode && code.length) out.push(`<pre><code>${code.join('\n')}</code></pre>`);
+  flush();
+  return out.join('\n');
+}

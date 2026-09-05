@@ -20,7 +20,17 @@ import { lsGet, lsSet } from './util';
 
 // ------------------------------------------------------------------ routing
 
-export const ROUTES = ['home', 'files', 'deadlines', 'announcements', 'grades', 'arcade', 'settings'] as const;
+export const ROUTES = [
+  'home',
+  'files',
+  'whatsnew',
+  'deadlines',
+  'announcements',
+  'grades',
+  'study',
+  'arcade',
+  'settings',
+] as const;
 export type Route = (typeof ROUTES)[number];
 
 export const route = writable<Route>('home');
@@ -28,6 +38,14 @@ export const route = writable<Route>('home');
 export function navigate(to: Route) {
   route.set(to);
 }
+
+/**
+ * Views that cannot import the router (self-contained arcade games, for
+ * instance) ask for a route change by dispatching
+ * `new CustomEvent('nussync:navigate', { detail: { view: 'study' } })` on
+ * window. Wired once, from wireEvents.
+ */
+const NAV_EVENT = 'nussync:navigate';
 
 // ------------------------------------------------------------------- toasts
 
@@ -111,6 +129,13 @@ export const recentFiles = writable<FileNode[]>([]);
 export const stats = writable<Stats | null>(null);
 export const settings = writable<Settings | null>(null);
 
+/**
+ * Files changed since the What's-new feed was last marked seen. Refreshed on
+ * `feed:updated` (emitted after every sync and after MarkFeedSeen) so the nav
+ * badge stays honest without polling.
+ */
+export const unseenCount = writable<number>(0);
+
 export const syncStatus = writable<SyncStatus>({
   Running: false,
   Phase: 'idle',
@@ -166,6 +191,8 @@ export const loadAnnouncements = () =>
 export const loadGrades = () => guard('Load grades', () => api.getGrades(), (v) => grades.set(v ?? []));
 export const loadRecent = () => guard('Load recent files', () => api.getRecentFiles(10), (v) => recentFiles.set(v ?? []));
 export const loadStats = () => guard('Load stats', () => api.getStats(), (v) => stats.set(v ?? null));
+export const loadUnseenCount = () =>
+  guard('Load unseen count', () => api.getUnseenCount(), (v) => unseenCount.set(v ?? 0));
 export const loadSettings = () =>
   guard('Load settings', () => api.getSettings(), (v) => {
     if (!v) return;
@@ -186,6 +213,7 @@ export async function loadAll() {
     loadRecent(),
     loadStats(),
     loadSettings(),
+    loadUnseenCount(),
   ]);
   await guard('Read sync status', () => api.getSyncStatus(), (v) => v && syncStatus.set(v));
 }
@@ -252,6 +280,7 @@ export function wireEvents(): () => void {
       void loadRecent();
       void loadStats();
       void loadDeadlines();
+      void loadUnseenCount();
     }),
   );
 
@@ -270,12 +299,28 @@ export function wireEvents(): () => void {
   );
 
   offs.push(
+    on('feed:updated', (n: number) => {
+      unseenCount.set(typeof n === 'number' ? n : 0);
+      void loadRecent();
+    }),
+  );
+
+  offs.push(
     on('toast', (p: ToastPayload) => {
       if (!p?.Message) return;
       const level = p.Level === 'success' || p.Level === 'error' ? p.Level : 'info';
       toast(p.Message, level);
     }),
   );
+
+  if (typeof window !== 'undefined') {
+    const onNav = (e: Event) => {
+      const view = (e as CustomEvent<{ view?: string }>).detail?.view;
+      if (view && (ROUTES as readonly string[]).includes(view)) navigate(view as Route);
+    };
+    window.addEventListener(NAV_EVENT, onNav);
+    offs.push(() => window.removeEventListener(NAV_EVENT, onNav));
+  }
 
   return () => {
     offs.forEach((off) => {

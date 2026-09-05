@@ -3,8 +3,8 @@
   import Icon from '../components/Icon.svelte';
   import { petEnabled, petName } from '../pet';
   import { courses, loadCourses, settings, theme, toast } from '../stores';
-  import type { Settings, TelegramStatus } from '../types';
-  import { durLabel, parseDurLabel } from '../util';
+  import type { Settings, StudyStatus, TelegramStatus } from '../types';
+  import { durLabel, lsGet, lsSet, parseDurLabel } from '../util';
 
   let draft = $state<Settings | null>(null);
   let baseline = $state<string>('');
@@ -23,6 +23,48 @@
 
   let extInput = $state('');
   let ladderInput = $state('');
+
+  // ------------------------------------------------------------- study
+
+  const MODEL_KEY = 'nussync.study.model';
+
+  const MODELS = [
+    { v: 'opus', label: 'Opus — slowest, strongest' },
+    { v: 'sonnet', label: 'Sonnet — the balanced default' },
+    { v: 'haiku', label: 'Haiku — fastest, cheapest' },
+  ];
+
+  let study = $state<StudyStatus | null>(null);
+  let studyLoading = $state(true);
+  let studyModel = $state<string>(lsGet(MODEL_KEY, 'sonnet'));
+
+  $effect(() => {
+    lsSet(MODEL_KEY, studyModel);
+  });
+
+  async function loadStudy() {
+    studyLoading = true;
+    try {
+      study = await api.getStudyStatus();
+    } catch (err) {
+      study = { CLIFound: false, Version: '', LoggedIn: false, Error: errMsg(err), Models: null };
+    } finally {
+      studyLoading = false;
+    }
+  }
+
+  $effect(() => {
+    void loadStudy();
+  });
+
+  const TELEGRAM_COMMANDS: Array<[string, string]> = [
+    ['/due', 'Next 10 unsubmitted deadlines, grouped by how soon they are'],
+    ['/new', 'Files changed in the last 24 hours, grouped by course'],
+    ['/files <query>', 'Full-text search across your library, top 8 hits'],
+    ['/sync', 'Kick off a sync and reply with the summary when it lands'],
+    ['/grades', 'Last 10 graded submissions, with the class mean when known'],
+    ['/help', 'The command list (so is anything else it does not recognise)'],
+  ];
 
   const INTERVALS = [
     { v: 15, label: 'Every 15 minutes' },
@@ -371,6 +413,19 @@
               </button>
             </div>
           </div>
+
+          <div class="field">
+            <span class="lbl">Bot commands</span>
+            <div class="cmd-card">
+              {#each TELEGRAM_COMMANDS as [cmd, what] (cmd)}
+                <div class="cmd-row">
+                  <span class="mono cmd">{cmd}</span>
+                  <span class="cmd-what muted">{what}</span>
+                </div>
+              {/each}
+            </div>
+            <span class="help">Send these to the bot from any device. Messages from other chats are ignored.</span>
+          </div>
         </div>
       </section>
 
@@ -426,6 +481,18 @@
               <span class="help">Ping me when a grade is released.</span>
             </span>
           </label>
+
+          <label class="switch-row">
+            <input type="checkbox" bind:checked={draft.NotifyDesktop} />
+            <span class="track"><span class="knob"></span></span>
+            <span class="switch-text">
+              <span class="switch-title">Desktop notifications</span>
+              <span class="help">
+                Windows toast after a sync brings new files — “3 new files in CS4246, MA3236”. Clicking it
+                brings NUSSync to the front.
+              </span>
+            </span>
+          </label>
         </div>
       </section>
 
@@ -453,6 +520,25 @@
             </select>
           </label>
 
+          <label class="field narrow">
+            <span class="lbl">Global hotkey</span>
+            <input
+              class="input mono"
+              type="text"
+              bind:value={draft.Hotkey}
+              placeholder="ctrl+shift+n"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <span class="help">
+              Shows or hides the window from anywhere. Modifiers <span class="mono">ctrl alt shift win</span>
+              joined by <span class="mono">+</span>, then one key (a letter, a digit, <span class="mono">f1</span>–<span
+                class="mono">f12</span
+              >, or a named key). Leave it empty to disable. Best effort — another app may already own the
+              combination.
+            </span>
+          </label>
+
           <label class="switch-row">
             <input type="checkbox" bind:checked={draft.LaunchAtLogin} />
             <span class="track"><span class="knob"></span></span>
@@ -460,6 +546,60 @@
               <span class="switch-title">Launch at login</span>
               <span class="help">Start NUSSync minimised when Windows starts.</span>
             </span>
+          </label>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------ Study -->
+      <section class="card section">
+        <div class="section-head">
+          <h2>Study</h2>
+          <p class="muted">Overviews, quizzes and flashcards run through your local Claude Code CLI.</p>
+        </div>
+        <div class="fields">
+          <div class="study-card" class:ready={!!study?.CLIFound && !!study?.LoggedIn}>
+            <div class="study-icon">
+              <Icon name={study?.CLIFound && study?.LoggedIn ? 'checkCircle' : 'alert'} size={16} />
+            </div>
+            <div class="study-body">
+              {#if studyLoading}
+                <div class="study-title"><span class="spinner"></span> Checking the CLI…</div>
+              {:else if !study?.CLIFound}
+                <div class="study-title">Claude Code CLI not found</div>
+                <div class="study-sub">
+                  Install it and make sure <span class="mono">claude</span> is on your PATH, then re-check.
+                  Nothing in the Study view will run until it is.
+                </div>
+              {:else if !study?.LoggedIn}
+                <div class="study-title">CLI found, but not signed in</div>
+                <div class="study-sub">
+                  Run <span class="mono">claude auth login</span> in a terminal, then re-check.
+                  {#if study?.Error}<br /><span class="faint">{study.Error}</span>{/if}
+                </div>
+              {:else}
+                <div class="study-title">Ready</div>
+                <div class="study-sub">
+                  <span class="mono">claude</span> {study.Version || ''} · signed in. Generation is always on
+                  demand — nothing runs by itself.
+                </div>
+              {/if}
+            </div>
+            <div class="study-actions">
+              <button class="btn" onclick={loadStudy} disabled={studyLoading}>
+                {#if studyLoading}<span class="spinner"></span>{:else}<Icon name="sync" size={13} />{/if}
+                Re-check
+              </button>
+            </div>
+          </div>
+
+          <label class="field narrow">
+            <span class="lbl">Default model</span>
+            <select class="select" bind:value={studyModel}>
+              {#each MODELS as m (m.v)}
+                <option value={m.v} disabled={!!study?.Models && !study.Models.includes(m.v)}>{m.label}</option>
+              {/each}
+            </select>
+            <span class="help">Used for new overviews, quizzes, asks and flashcards. Saved on this machine only.</span>
           </label>
         </div>
       </section>
@@ -804,6 +944,92 @@
   .tg-actions {
     display: flex;
     gap: 6px;
+    flex: none;
+  }
+
+  .cmd-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .cmd-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 11px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .cmd-row:last-child {
+    border-bottom: none;
+  }
+
+  .cmd {
+    flex: none;
+    min-width: 108px;
+    color: var(--accent-text);
+    font-weight: 550;
+  }
+
+  .cmd-what {
+    font-size: 12px;
+    min-width: 0;
+  }
+
+  .study-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-subtle);
+  }
+
+  .study-card.ready {
+    border-color: var(--green);
+    background: var(--green-soft);
+  }
+
+  .study-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--amber);
+  }
+
+  .study-card.ready .study-icon {
+    color: var(--green);
+  }
+
+  .study-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .study-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 550;
+  }
+
+  .study-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    line-height: 1.55;
+  }
+
+  .study-actions {
     flex: none;
   }
 

@@ -14,13 +14,21 @@ import type {
   Announcement,
   AppAPI,
   AppEvent,
+  AskResult,
   Course,
   Deadline,
+  FeedItem,
   FileNode,
+  Flashcard,
   Grade,
+  Overview,
+  Quiz,
+  QuizAttempt,
   SearchHit,
   Settings,
   Stats,
+  StudyJob,
+  StudyStatus,
   SyncStatus,
   TelegramStatus,
 } from './types';
@@ -80,6 +88,40 @@ export const api = {
   sendTestTelegram: (): Promise<void> => call('SendTestTelegram'),
   chooseSyncDir: (): Promise<string> => call('ChooseSyncDir'),
   getStats: (): Promise<Stats> => call('GetStats'),
+
+  // ------------------------------------------------------------ what's new
+  getWhatsNew: (sinceDays: number): Promise<FeedItem[]> => call('GetWhatsNew', sinceDays),
+  markFeedSeen: (): Promise<void> => call('MarkFeedSeen'),
+  getUnseenCount: (): Promise<number> => call('GetUnseenCount'),
+
+  // ------------------------------------------------------- deadline detail
+  getDeadlineDetail: (id: number): Promise<Deadline> => call('GetDeadlineDetail', id),
+
+  // ------------------------------------------------------- window control
+  showWindow: (): Promise<void> => call('ShowWindow'),
+  hideWindow: (): Promise<void> => call('HideWindow'),
+  toggleWindow: (): Promise<void> => call('ToggleWindow'),
+
+  // ----------------------------------------------------------------- study
+  getStudyStatus: (): Promise<StudyStatus> => call('GetStudyStatus'),
+  startOverview: (fileID: number, model: string): Promise<string> => call('StartOverview', fileID, model),
+  getOverview: (fileID: number): Promise<Overview> => call('GetOverview', fileID),
+  startQuiz: (fileIDs: number[], model: string, n: number): Promise<string> => call('StartQuiz', fileIDs, model, n),
+  getQuizzes: (fileID: number): Promise<Quiz[]> => call('GetQuizzes', fileID),
+  getQuiz: (id: number): Promise<Quiz> => call('GetQuiz', id),
+  submitQuizAttempt: (a: QuizAttempt): Promise<QuizAttempt> => call('SubmitQuizAttempt', a),
+  getQuizAttempts: (quizID: number): Promise<QuizAttempt[]> => call('GetQuizAttempts', quizID),
+  startAsk: (fileIDs: number[], question: string, model: string): Promise<string> =>
+    call('StartAsk', fileIDs, question, model),
+  getAsks: (fileID: number): Promise<AskResult[]> => call('GetAsks', fileID),
+  startFlashcards: (fileID: number, model: string, n: number): Promise<string> =>
+    call('StartFlashcards', fileID, model, n),
+  getDueFlashcards: (limit: number): Promise<Flashcard[]> => call('GetDueFlashcards', limit),
+  reviewFlashcard: (id: number, grade: number): Promise<void> => call('ReviewFlashcard', id, grade),
+  getStudyJob: (id: string): Promise<StudyJob> => call('GetStudyJob', id),
+  getStudyJobs: (): Promise<StudyJob[]> => call('GetStudyJobs'),
+  cancelStudyJob: (id: string): Promise<void> => call('CancelStudyJob', id),
+  getFilePageCount: (fileID: number): Promise<number> => call('GetFilePageCount', fileID),
 };
 
 /**

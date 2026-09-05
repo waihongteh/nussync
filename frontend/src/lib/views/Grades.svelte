@@ -33,6 +33,9 @@
     });
   });
 
+  /** Means arrive only once GetDeadlineDetail has cached them, so many stay 0. */
+  const meanCount = $derived($grades.filter((g) => g.Mean > 0).length);
+
   function pct(score: number, possible: number): number {
     if (!possible) return 0;
     return Math.max(0, Math.min(100, (score / possible) * 100));
@@ -50,7 +53,11 @@
   <div class="view-narrow">
     <header class="head">
       <h1 class="page-title">Grades</h1>
-      <p class="muted sub">{$grades.length} graded items across {grouped.length} courses</p>
+      <p class="muted sub">
+        {$grades.length} graded items across {grouped.length} courses{meanCount
+          ? ` · class mean known for ${meanCount}`
+          : ''}
+      </p>
     </header>
 
     {#each grouped as g (g.code)}
@@ -71,6 +78,7 @@
             <tr>
               <th class="c-title">Item</th>
               <th class="c-score">Score</th>
+              <th class="c-mean">Class mean</th>
               <th class="c-bar">Percentage</th>
               <th class="c-date">Graded</th>
             </tr>
@@ -81,6 +89,17 @@
               <tr onclick={() => openExternal(item.URL)}>
                 <td class="c-title truncate">{item.Title}</td>
                 <td class="c-score">{fmtScore(item.Score)} / {fmtScore(item.Possible)}</td>
+                <td class="c-mean">
+                  {#if item.Mean}
+                    {@const delta = item.Score - item.Mean}
+                    <span class="mean-val">{fmtScore(item.Mean)}</span>
+                    <span class="delta" class:up={delta >= 0} class:down={delta < 0}>
+                      {delta >= 0 ? '+' : ''}{fmtScore(delta)} vs class
+                    </span>
+                  {:else}
+                    <span class="faint">—</span>
+                  {/if}
+                </td>
                 <td class="c-bar">
                   <span class="bar-wrap">
                     <span class="bar"><span class="fill {tone(p)}" style="width:{p}%"></span></span>
@@ -189,7 +208,7 @@
   }
 
   .c-title {
-    width: 42%;
+    width: 32%;
     font-size: 13px;
   }
 
@@ -200,7 +219,30 @@
   }
 
   .c-bar {
-    width: 28%;
+    width: 22%;
+  }
+
+  .c-mean {
+    width: 18%;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mean-val {
+    margin-right: 5px;
+  }
+
+  .delta {
+    font-size: 11px;
+    font-weight: 550;
+  }
+
+  .delta.up {
+    color: var(--green);
+  }
+
+  .delta.down {
+    color: var(--amber);
   }
 
   .c-date {

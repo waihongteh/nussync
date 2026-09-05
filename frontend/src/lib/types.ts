@@ -34,6 +34,8 @@ export interface FileNode {
   Module: string;
   /** downloaded locally */
   Synced: boolean;
+  /** changed after the feed was last marked seen — badge it */
+  IsNew: boolean;
   /** for dirs */
   Children: FileNode[] | null;
 }
@@ -58,6 +60,25 @@ export interface Deadline {
   Submitted: boolean;
   URL: string;
   PointsPossible: number;
+  /** raw Canvas HTML — the frontend MUST sanitize it. Filled by GetDeadlineDetail. */
+  Description: string;
+  /** e.g. ["online_upload"] */
+  SubmissionTypes: string[] | null;
+  Attachments: FileNode[] | null;
+  /** the user's score, 0 when ungraded */
+  Score: number;
+  Graded: boolean;
+  /** null unless graded AND Canvas discloses score statistics */
+  Stats: ScoreStats | null;
+}
+
+export interface ScoreStats {
+  Mean: number;
+  Min: number;
+  Max: number;
+  Median: number;
+  /** 0 on Canvas builds that do not report it — "unknown", not "nobody" */
+  Count: number;
 }
 
 export interface Announcement {
@@ -79,6 +100,8 @@ export interface Grade {
   Possible: number;
   GradedAt: string;
   URL: string;
+  /** class mean, 0 when never cached by GetDeadlineDetail */
+  Mean: number;
 }
 
 export interface Settings {
@@ -96,7 +119,11 @@ export interface Settings {
   SyncIntervalMin: number;
   NotifyAnnouncements: boolean;
   NotifyGrades: boolean;
+  /** Windows toast after a sync brings new files; default true */
+  NotifyDesktop: boolean;
   LaunchAtLogin: boolean;
+  /** global show/hide, default "ctrl+shift+n"; "" disables */
+  Hotkey: string;
   /** "system" | "light" | "dark" */
   Theme: 'system' | 'light' | 'dark' | string;
 }
@@ -129,6 +156,116 @@ export interface Stats {
   LastSync: string;
 }
 
+// -------------------------------------------------------------- what's new
+
+export interface FeedItem {
+  /** canvas file id */
+  ID: number;
+  CourseID: number;
+  /** full code, e.g. "CS4246/CS5446" */
+  CourseCode: string;
+  Name: string;
+  /** absolute local path — pass to OpenFile / RevealFile */
+  Path: string;
+  RelPath: string;
+  Size: number;
+  /** RFC3339 */
+  ChangedAt: string;
+  Kind: 'new' | 'updated' | string;
+  Module: string;
+}
+
+// ------------------------------------------------------------------- study
+
+export interface StudyStatus {
+  CLIFound: boolean;
+  Version: string;
+  LoggedIn: boolean;
+  Error: string;
+  /** ["opus","sonnet","haiku"] */
+  Models: string[] | null;
+}
+
+export type StudyKind = 'overview' | 'quiz' | 'ask' | 'flashcards';
+export type StudyJobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+
+export interface StudyJob {
+  ID: string;
+  Kind: StudyKind | string;
+  FileIDs: number[] | null;
+  Status: StudyJobStatus | string;
+  Progress: string;
+  Error: string;
+  /** RFC3339 */
+  StartedAt: string;
+  /** RFC3339 */
+  FinishedAt: string;
+  Model: string;
+  CostUSD: number;
+}
+
+export interface Overview {
+  FileID: number;
+  Markdown: string;
+  CreatedAt: string;
+  Model: string;
+}
+
+export interface Question {
+  ID: number;
+  Type: 'mcq' | 'short' | string;
+  Prompt: string;
+  Options: string[] | null;
+  /** mcq: option letter A-D; short: the model answer */
+  Answer: string;
+  Explanation: string;
+  Page: number;
+}
+
+export interface Quiz {
+  ID: number;
+  FileIDs: number[] | null;
+  Title: string;
+  CreatedAt: string;
+  Model: string;
+  Questions: Question[] | null;
+}
+
+export interface QuizAttempt {
+  QuizID: number;
+  /** question ID -> answer */
+  Answers: Record<number, string>;
+  Score: number;
+  Total: number;
+  TakenAt: string;
+}
+
+export interface Flashcard {
+  ID: number;
+  FileID: number;
+  Front: string;
+  Back: string;
+  /** RFC3339 */
+  Due: string;
+  /** days */
+  Interval: number;
+  Ease: number;
+}
+
+export interface AskResult {
+  Question: string;
+  /** markdown */
+  Answer: string;
+  Citations: string[] | null;
+  CreatedAt: string;
+}
+
+/** `study:progress` payload */
+export interface StudyProgress {
+  JobID: string;
+  Text: string;
+}
+
 export interface ToastPayload {
   /** info | success | error */
   Level: 'info' | 'success' | 'error' | string;
@@ -141,7 +278,10 @@ export type AppEvent =
   | 'sync:done'
   | 'deadlines:updated'
   | 'announcements:new'
-  | 'toast';
+  | 'toast'
+  | 'feed:updated'
+  | 'study:job'
+  | 'study:progress';
 
 /** Typed shape of the bound Go App methods. */
 export interface AppAPI {
@@ -168,6 +308,38 @@ export interface AppAPI {
   SendTestTelegram(): Promise<void>;
   ChooseSyncDir(): Promise<string>;
   GetStats(): Promise<Stats>;
+
+  // ---------------------------------------------------------- what's new
+  GetWhatsNew(sinceDays: number): Promise<FeedItem[]>;
+  MarkFeedSeen(): Promise<void>;
+  GetUnseenCount(): Promise<number>;
+
+  // ------------------------------------------------------ deadline detail
+  GetDeadlineDetail(id: number): Promise<Deadline>;
+
+  // ------------------------------------------------------ window control
+  ShowWindow(): Promise<void>;
+  HideWindow(): Promise<void>;
+  ToggleWindow(): Promise<void>;
+
+  // ------------------------------------------------------------- study
+  GetStudyStatus(): Promise<StudyStatus>;
+  StartOverview(fileID: number, model: string): Promise<string>;
+  GetOverview(fileID: number): Promise<Overview>;
+  StartQuiz(fileIDs: number[], model: string, n: number): Promise<string>;
+  GetQuizzes(fileID: number): Promise<Quiz[]>;
+  GetQuiz(id: number): Promise<Quiz>;
+  SubmitQuizAttempt(a: QuizAttempt): Promise<QuizAttempt>;
+  GetQuizAttempts(quizID: number): Promise<QuizAttempt[]>;
+  StartAsk(fileIDs: number[], question: string, model: string): Promise<string>;
+  GetAsks(fileID: number): Promise<AskResult[]>;
+  StartFlashcards(fileID: number, model: string, n: number): Promise<string>;
+  GetDueFlashcards(limit: number): Promise<Flashcard[]>;
+  ReviewFlashcard(id: number, grade: number): Promise<void>;
+  GetStudyJob(id: string): Promise<StudyJob>;
+  GetStudyJobs(): Promise<StudyJob[]>;
+  CancelStudyJob(id: string): Promise<void>;
+  GetFilePageCount(fileID: number): Promise<number>;
 }
 
 // ------------------------------------------------------------------ UI-only

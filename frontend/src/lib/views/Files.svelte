@@ -54,6 +54,7 @@
       Source: 'files',
       Module: '',
       Synced: true,
+      IsNew: false,
       Children: children,
     };
   }
@@ -294,6 +295,7 @@
                     <span class="dot" style="background:{$courseByID.get(f.CourseID)?.Color ?? 'var(--text-faint)'}"></span>
                     <Icon name={KIND_ICON[fileKind(f.Name)] ?? 'file'} size={14} />
                     <span class="truncate">{f.Name}</span>
+                    {#if f.IsNew}<span class="chip nw" title="Changed since you last opened What's new">New</span>{/if}
                     {#if !f.Synced}<span class="chip ns">not synced</span>{/if}
                   </span>
                 </td>
@@ -587,6 +589,15 @@
     width: 16%;
     color: var(--text-faint);
     font-size: 12.5px;
+  }
+
+  .chip.nw {
+    height: 17px;
+    padding: 0 6px;
+    font-size: 10.5px;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    flex: none;
   }
 
   .chip.ns {

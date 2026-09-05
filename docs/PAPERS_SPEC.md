@@ -46,3 +46,12 @@ cards (add / download / open), Library with status columns or filter, progress
 Study view with FileID, citations/references drawer with in-library marks,
 Recommendations strip, Digest preview + "Send now", BibTeX export copy/save,
 Settings section for keywords/categories/hour/toggle. Nav item "Papers".
+
+## Telegram: SEPARATE BOT (added 2026-09-05 23:50)
+- `.env` has `PAPER_TRACKER_TELEGRAM_TOKEN` — a second bot dedicated to papers.
+  Import into Settings as `PaperTelegramToken`; separate `PaperTelegramChatID`
+  and its own pairing (`PairPaperTelegram()`), own long-poll loop in
+  internal/notify (reuse telegram.Client). Digest + /paper /save /reading
+  /help go through THIS bot only; the NUSSync bot keeps course commands.
+- Settings UI: Papers section shows the paper bot status + Pair + Send test.
+- Ask user for the bot's @username when awake (unknown yet); not needed for API.

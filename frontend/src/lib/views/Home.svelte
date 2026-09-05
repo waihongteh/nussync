@@ -9,6 +9,7 @@
     openFileNode,
     recentFiles,
     stats,
+    unseenCount,
   } from '../stores';
   import { countdown, fileKind, fmtBytes, relTime, urgency } from '../util';
 
@@ -75,6 +76,17 @@
         {/if}
       </p>
     </header>
+
+    {#if $unseenCount > 0}
+      <button class="new-line" onclick={() => navigate('whatsnew')}>
+        <span class="pulse"></span>
+        <span class="new-text">
+          <strong>{$unseenCount}</strong>
+          file{$unseenCount === 1 ? '' : 's'} new or updated since your last visit
+        </span>
+        <span class="new-go">See what's new <Icon name="chevronRight" size={12} /></span>
+      </button>
+    {/if}
 
     <section class="tiles">
       {#each tiles as t (t.label)}
@@ -162,6 +174,49 @@
   .sub {
     margin-top: 3px;
     font-size: 13px;
+  }
+
+  .new-line {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 9px 13px;
+    margin-bottom: 14px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    background: var(--accent-soft);
+    color: var(--text);
+    font-size: 12.5px;
+    text-align: left;
+    transition: background var(--t);
+  }
+
+  .new-line:hover {
+    background: var(--bg-active);
+  }
+
+  .pulse {
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .new-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .new-go {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    font-size: 11.5px;
+    font-weight: 550;
+    color: var(--accent-text);
   }
 
   .tiles {
