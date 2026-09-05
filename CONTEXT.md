@@ -29,10 +29,17 @@ unsubmitted assignments/quizzes, plus announcements/grades notifications.
 
 ## Status
 - [x] API probe, .gitignore
-- [ ] Go backend: client, sync, sqlite, config
+- [~] Go backend (Opus worker, started 2026-09-05 night)
 - [ ] Telegram + reminder daemon
-- [ ] Wails UI (minimal, modern)
+- [~] Wails UI (Opus worker, parallel, mock api layer in frontend/src/lib/api.ts)
 - [ ] Build exe
 
 ## Dead ends
 (none yet)
+
+## Operational
+- Toolchain: Go 1.27 (`C:\Program Files\Go\bin`), wails CLI in `~/go/bin`,
+  Node 22. Prepend both to PATH in Git Bash. `wails doctor` green.
+- Telegram bot: @nuscanvassync_bot, token in `.env` as TELEGRAM_TOKEN.
+- Work split: orchestrator (main session) + Opus subagents per component;
+  contract in `docs/API_CONTRACT.md` is the source of truth for bindings.
