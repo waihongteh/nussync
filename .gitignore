@@ -2,4 +2,6 @@
 *.db
 data/
 dist/
-build/
+build/bin/
+frontend/node_modules/
+frontend/package.json.md5
