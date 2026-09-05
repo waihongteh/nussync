@@ -445,3 +445,15 @@ Decisions:
 
 ## Repo
 - GitHub: https://github.com/waihongteh/nussync (origin, branch main). Windows-only target; Mac/Linux port abandoned 2026-09-05 by user choice.
+
+## Status snapshot 2026-09-06 00:20
+- Built + committed + pushed: backend (sync incl. Pages, FTS, Telegram bot +
+  commands, reminders, feed, detail/stats, tray, hotkey, toast, Study via
+  Claude Code CLI), frontend (all views incl. What's new, Study, Arcade with
+  Nibble Run / Lecture Merge / Quiz Rush, pet, settings). Exe builds.
+- NOT yet integration-tested against real backend: What's new, deadline
+  detail, Study, Quiz Rush, settings additions (only mock-verified).
+- Study blocked until user runs `claude auth login`.
+- Queued for 02:38 wake (session cron): Papers feature per docs/PAPERS_SPEC.md
+  (backend + frontend + separate paper bot + summary + chat panel), then
+  integration pass, build, push.
