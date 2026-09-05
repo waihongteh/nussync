@@ -112,6 +112,7 @@ func (a *App) startup(ctx context.Context) {
 	cfg := a.settings()
 	a.sched = notify.NewScheduler(a.st, a.telegram, cfg)
 	a.sched.Start(ctx)
+	a.studyInit()
 
 	// One getUpdates consumer for the whole process; PairTelegram waits on it.
 	a.bot = notify.NewBot(a.st, a.telegram, cfg)

@@ -37,6 +37,8 @@ func runCLI(mode string) int {
 		return cliPair(app)
 	case "--notify-test":
 		return cliNotifyTest(app)
+	case "--study-test":
+		return runStudyCLI(os.Args[2:])
 	}
 	return 2
 }

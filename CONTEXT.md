@@ -266,8 +266,67 @@ Contract for the new bindings: **`docs/API_CONTRACT.md` stays the base contract;
   disables. Wails v2 has no "is window visible", so `App.windowVisible` tracks
   it.
 
+## Study/AI backend (2026-09-05)
+Contract: `docs/CONTRACT_STUDY.md`. Code: `internal/study/**`, `app_study.go`,
+`types_study.go`, `cli_study.go`, `internal/store/study.go` (tables `study_*`,
+created lazily by `MigrateStudy`, **not** from `Store.migrate`).
+
+- **Claude Code CLI flags that work** (v2.1.251):
+  `claude -p --output-format stream-json --verbose --safe-mode
+  --strict-mcp-config --model <opus|sonnet|haiku> --max-turns N
+  --permission-mode dontAsk --tools Read --allowedTools Read --add-dir <dir>`.
+  `stream-json` **requires** `--verbose` or the CLI refuses to start.
+  `--permission-mode dontAsk` auto-denies instead of prompting.
+- **`--safe-mode` is mandatory, not optional.** Without it the child inherits
+  the user's SessionStart hooks — this machine has one that injects a
+  "CAVEMAN MODE ACTIVE" output style, which would rewrite every overview and
+  break every JSON reply. Safe mode also drops CLAUDE.md, skills, plugins and
+  custom agents, so runs are deterministic and start faster. `--bare` is *not*
+  a substitute: it forces `ANTHROPIC_API_KEY` auth, which this user has not got.
+- **The prompt goes on stdin, never in argv.** `claude` on PATH is the npm
+  `claude.cmd` shim; Go runs `.cmd` through `cmd.exe`, which mangles a
+  multi-line quoted argument and the process dies with exit 1 and *no output at
+  all*. `claude -p` with the prompt piped in works. We also prefer the real
+  `%APPDATA%/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe` over
+  the shim. Stdin is closed after the prompt so the child never blocks.
+- **Nested-session env vars break auth.** Launching NUSSync from inside a
+  Claude Code session leaks `CLAUDECODE`, `CLAUDE_CODE_SDK_HAS_*_AUTH_REFRESH`,
+  `CLAUDE_CODE_MESSAGING_*` etc.; the child then defers OAuth refresh to a host
+  that is not listening. `study.childEnv()` strips them.
+- **`claude auth status` prints JSON** (`{"loggedIn":…,"authMethod":…}`), is
+  free and instant — used as the primary login check before falling back to a
+  billable one-turn probe. Result cached 10 min.
+- **Exit code is 0 even on failure.** Always read `is_error` in the
+  `type:"result"` line; `total_cost_usd`, `duration_ms`, `num_turns` and
+  `usage` are on that same line.
+- Stream lines seen: `system/init`, `system/hook_*` (absent under safe mode),
+  `assistant` (text + tool_use), `user` (tool results), `result`. Tool-result
+  lines can be megabytes, so stdout is read with an unbounded line reader, not
+  `bufio.Scanner`. Progress is scraped from `assistant` lines into
+  `study:progress`.
+- Cancel = `taskkill /T /F /PID`: killing only the direct child orphans node.
+- **Not verified end to end against the live model.** On 2026-09-05 the
+  on-disk credentials (`~/.claude/.credentials.json`) had `expiresAt: 0` and
+  every child run returned `"Failed to authenticate: OAuth session expired and
+  could not be refreshed"` — the Claude Code *host app* holds the live tokens
+  in memory and the CLI cannot refresh on its own. Fix on the user's side:
+  run `claude auth login` (or `claude setup-token` for a long-lived token) in
+  a normal terminal, then re-run `--study-test`. Everything else was verified:
+  process spawn, stream parsing, `is_error` surfacing, page count (17 for the
+  CS4246 Course Overview PDF), job queue, events, and — through a stub CLI
+  pointed at by the `NUSSYNC_CLAUDE_BIN` override — fenced-JSON extraction,
+  SQLite round-trip and exact MCQ grading (3/3).
+- SM-2 lite: grade 0-3. Hard multiplies by 0.6, good by 1.0, easy by 1.3 on top
+  of the ease factor; ramp 1 day then 6 days; ease floor 1.3; interval capped
+  at 365. Hard **must** shrink relative to good — an earlier 1.2 modifier made
+  "hard" schedule further out than "good".
+- `NUSSYNC_CLAUDE_BIN` overrides binary discovery (testing only).
+
 ## Dead ends
 - Sanitizing the whole cross-listed course code into one folder name.
+- Passing a multi-line `claude` prompt as an argv element on Windows (see above).
+- `claude --bare` for the Study backend: it disables OAuth and demands an API key.
+- Anthropic Go SDK for Study: needs an API key the user does not have.
 - FTS5 contentless tables (`content=''`) — `snippet()` cannot work on them.
 - `regexp.MustCompile` with a backreference (`</\1>`) — panics at init in RE2.
 - Guarding `FileIDsInHTML` with `strings.Contains(body, "/files/")` *before*
