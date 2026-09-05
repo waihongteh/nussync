@@ -548,7 +548,79 @@ Contract: `docs/CONTRACT_PAPERS.md`. Code: `internal/papers/**`, `app_papers.go`
 ## Repo
 - GitHub: https://github.com/waihongteh/nussync (origin, branch main). Windows-only target; Mac/Linux port abandoned 2026-09-05 by user choice.
 
-## Status snapshot 2026-09-06 00:20
+## Status: SHIPPED (2026-09-06 03:25)
+
+Full integration pass against a live `wails dev` + real Canvas/arXiv backend,
+then a clean `wails build`. Everything listed in the previous snapshot is now
+verified against the real bindings, not the mock.
+
+`go build/vet/test ./...` clean, `gofmt -l .` empty, `npm run check`
+139 files / 0 errors, `npm run build` clean, `wails build` ->
+`build/bin/nussync.exe` (17.7 MB); the exe launches, stays up, logs nothing but
+the WebView2 line, and survives two Ctrl+Shift+N presses.
+
+### Verified live this pass
+- **What's new**: 125-item feed grouped day/course, "Mark all seen" -> nav badge
+  0 and every `New` chip in Files cleared. `feed:updated` moves the badge after
+  a sync (107 -> 125) without a reload.
+- **Deadlines detail**: `GetDeadlineDetail` renders sanitized description HTML,
+  submission types, points ("10 pts" on CS4246 Assignment 1), and resolves
+  attachments through `FileIDsInHTML` (NST2030 Essay -> "Essay - Prompt.pdf").
+- **Study**: status card = CLI found / not signed in, with the auth instructions
+  and Re-check; every run button disabled in that state (so no hang is
+  possible). Lazy page count works (Course Overview -> "17p").
+- **Papers**: arXiv+S2 search ("machine unlearning" -> 40 of 2.4M), Add,
+  Download (-> `files` row -1002, Pages 7, LocalPath set), status/page/stars/
+  notes autosave and survive a reload, Citations/References drawer, BibTeX
+  modal (3 entries), Recommendations, today's digest. The "Papers" pseudo-course
+  shows in the sidebar/Files with its file count — intended — and is now
+  filtered out of Settings > Courses to sync.
+- **Chat**: Ctrl+J (real key) opens the panel; Files selection supplies context;
+  session list; `SendChat` ends with exactly one `chat:done` carrying
+  `Error: "Failed to authenticate: ..."` in ~5 s, no hang.
+- **Arcade**: three cards; Quiz Rush empty state -> "Open Study" navigates.
+- **Settings**: `SaveSettings` round-trips byte-identical incl. all three
+  tokens; Hotkey and PaperDigestHour edits persist; paper bot card shows
+  @paper_trackerrr_bot.
+- Sidebar badges, all 10 palette navigation commands, the 3 arcade commands and
+  the file index are present. Console is clean apart from the known dev-only
+  `ipc.js ... reading 'nodes'` noise.
+
+### Bugs found and fixed this pass
+- `internal/papers/s2.go:21` — the citations/references and recommendations
+  endpoints reject `tldr` outright (`HTTP 400 Unrecognized or unsupported
+  fields: [tldr]`), so **every** Citations/References call failed and
+  recommendations always silently fell back to arXiv. Added `S2EdgeFields`
+  (S2Fields minus tldr) for `edge()` and `Recommendations()`; only
+  `/paper/search` and `/paper/{id}` serve tldr.
+- `frontend/src/lib/views/Papers.svelte:270` — `patch()` merged onto the `p` the
+  each-block handed it, so two edits inside the 700 ms debounce window made the
+  second drop the first (status + stars were lost when set right before a note).
+  It now merges onto the current row from `library`.
+- `frontend/src/lib/views/Settings.svelte:419` — "Courses to sync" listed the
+  synthetic `Papers` course (id -1) once it owned files; its toggle did nothing.
+  Now `$courses.filter((c) => c.ID > 0)`.
+
+### Still untested / outstanding
+- **Class score statistics and Grade.Mean**: no graded submissions exist on this
+  account this term (`grades` table is empty), so the stats bar and the
+  "vs class" column have only ever run against the mock.
+- **Study end to end** and **paper summaries**: still blocked on
+  `claude auth login`. Everything up to the auth failure is verified.
+- Neither Telegram bot is paired (@nuscanvassync_bot, @paper_trackerrr_bot);
+  Pair / Send test / digest delivery unexercised.
+- `ChooseSyncDir` (native modal blocks automation).
+- Global hotkey: registers with no error and the exe survives the keypresses,
+  but the show/hide toggle itself was not observed.
+- The arcade games' feel was not eyeballed (rAF is suspended while the dev
+  browser pane is hidden).
+- **Local DB was rebuilt at some point before this pass** (deadlines /
+  announcements / grades / kv were empty, 107 file rows, FTS holding 2 docs).
+  A full sync inside the app repopulated it: 126 files / ~178 MB, 5 deadlines,
+  26 announcements, 0 grades. Side effect: every row got a fresh
+  `first_seen_at`, so the whole library showed as "new" once.
+
+## Status snapshot 2026-09-06 00:20 (superseded by "Status: SHIPPED" above)
 - Built + committed + pushed: backend (sync incl. Pages, FTS, Telegram bot +
   commands, reminders, feed, detail/stats, tray, hotkey, toast, Study via
   Claude Code CLI), frontend (all views incl. What's new, Study, Arcade with

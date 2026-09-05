@@ -44,6 +44,96 @@ export namespace main {
 	        this.CreatedAt = source["CreatedAt"];
 	    }
 	}
+	export class ChatMessage {
+	    ID: number;
+	    SessionID: string;
+	    Role: string;
+	    Text: string;
+	    CreatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatMessage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.SessionID = source["SessionID"];
+	        this.Role = source["Role"];
+	        this.Text = source["Text"];
+	        this.CreatedAt = source["CreatedAt"];
+	    }
+	}
+	export class ChatSession {
+	    ID: string;
+	    FileID: number;
+	    PaperID: string;
+	    Title: string;
+	    ClaudeSessionID: string;
+	    Model: string;
+	    CreatedAt: string;
+	    UpdatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ChatSession(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.FileID = source["FileID"];
+	        this.PaperID = source["PaperID"];
+	        this.Title = source["Title"];
+	        this.ClaudeSessionID = source["ClaudeSessionID"];
+	        this.Model = source["Model"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.UpdatedAt = source["UpdatedAt"];
+	    }
+	}
+	export class CitationLink {
+	    ID: string;
+	    ArxivID: string;
+	    S2ID: string;
+	    DOI: string;
+	    Title: string;
+	    Authors: string[];
+	    Year: number;
+	    Venue: string;
+	    Abstract: string;
+	    TLDR: string;
+	    CitationCount: number;
+	    URL: string;
+	    PDFURL: string;
+	    PublishedAt: string;
+	    Source: string;
+	    InLibrary: boolean;
+	    Status: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CitationLink(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.ArxivID = source["ArxivID"];
+	        this.S2ID = source["S2ID"];
+	        this.DOI = source["DOI"];
+	        this.Title = source["Title"];
+	        this.Authors = source["Authors"];
+	        this.Year = source["Year"];
+	        this.Venue = source["Venue"];
+	        this.Abstract = source["Abstract"];
+	        this.TLDR = source["TLDR"];
+	        this.CitationCount = source["CitationCount"];
+	        this.URL = source["URL"];
+	        this.PDFURL = source["PDFURL"];
+	        this.PublishedAt = source["PublishedAt"];
+	        this.Source = source["Source"];
+	        this.InLibrary = source["InLibrary"];
+	        this.Status = source["Status"];
+	    }
+	}
 	export class Course {
 	    ID: number;
 	    Code: string;
@@ -281,6 +371,70 @@ export namespace main {
 	        this.Mean = source["Mean"];
 	    }
 	}
+	export class LibraryPaper {
+	    ID: string;
+	    ArxivID: string;
+	    S2ID: string;
+	    DOI: string;
+	    Title: string;
+	    Authors: string[];
+	    Year: number;
+	    Venue: string;
+	    Abstract: string;
+	    TLDR: string;
+	    CitationCount: number;
+	    URL: string;
+	    PDFURL: string;
+	    PublishedAt: string;
+	    Source: string;
+	    Status: string;
+	    Page: number;
+	    Pages: number;
+	    Stars: number;
+	    Tags: string[];
+	    Notes: string;
+	    KeyIdea: string;
+	    LocalPath: string;
+	    AddedAt: string;
+	    UpdatedAt: string;
+	    ReadAt: string;
+	    FileID: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new LibraryPaper(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.ArxivID = source["ArxivID"];
+	        this.S2ID = source["S2ID"];
+	        this.DOI = source["DOI"];
+	        this.Title = source["Title"];
+	        this.Authors = source["Authors"];
+	        this.Year = source["Year"];
+	        this.Venue = source["Venue"];
+	        this.Abstract = source["Abstract"];
+	        this.TLDR = source["TLDR"];
+	        this.CitationCount = source["CitationCount"];
+	        this.URL = source["URL"];
+	        this.PDFURL = source["PDFURL"];
+	        this.PublishedAt = source["PublishedAt"];
+	        this.Source = source["Source"];
+	        this.Status = source["Status"];
+	        this.Page = source["Page"];
+	        this.Pages = source["Pages"];
+	        this.Stars = source["Stars"];
+	        this.Tags = source["Tags"];
+	        this.Notes = source["Notes"];
+	        this.KeyIdea = source["KeyIdea"];
+	        this.LocalPath = source["LocalPath"];
+	        this.AddedAt = source["AddedAt"];
+	        this.UpdatedAt = source["UpdatedAt"];
+	        this.ReadAt = source["ReadAt"];
+	        this.FileID = source["FileID"];
+	    }
+	}
 	export class Overview {
 	    FileID: number;
 	    Markdown: string;
@@ -294,6 +448,130 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.FileID = source["FileID"];
+	        this.Markdown = source["Markdown"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.Model = source["Model"];
+	    }
+	}
+	export class Paper {
+	    ID: string;
+	    ArxivID: string;
+	    S2ID: string;
+	    DOI: string;
+	    Title: string;
+	    Authors: string[];
+	    Year: number;
+	    Venue: string;
+	    Abstract: string;
+	    TLDR: string;
+	    CitationCount: number;
+	    URL: string;
+	    PDFURL: string;
+	    PublishedAt: string;
+	    Source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Paper(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.ArxivID = source["ArxivID"];
+	        this.S2ID = source["S2ID"];
+	        this.DOI = source["DOI"];
+	        this.Title = source["Title"];
+	        this.Authors = source["Authors"];
+	        this.Year = source["Year"];
+	        this.Venue = source["Venue"];
+	        this.Abstract = source["Abstract"];
+	        this.TLDR = source["TLDR"];
+	        this.CitationCount = source["CitationCount"];
+	        this.URL = source["URL"];
+	        this.PDFURL = source["PDFURL"];
+	        this.PublishedAt = source["PublishedAt"];
+	        this.Source = source["Source"];
+	    }
+	}
+	export class PaperDigest {
+	    Date: string;
+	    Papers: Paper[];
+	    Reason: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PaperDigest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Date = source["Date"];
+	        this.Papers = this.convertValues(source["Papers"], Paper);
+	        this.Reason = source["Reason"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PaperSearchResult {
+	    Papers: Paper[];
+	    Total: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PaperSearchResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Papers = this.convertValues(source["Papers"], Paper);
+	        this.Total = source["Total"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PaperSummary {
+	    PaperID: string;
+	    Markdown: string;
+	    CreatedAt: string;
+	    Model: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PaperSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.PaperID = source["PaperID"];
 	        this.Markdown = source["Markdown"];
 	        this.CreatedAt = source["CreatedAt"];
 	        this.Model = source["Model"];
@@ -436,6 +714,12 @@ export namespace main {
 	    LaunchAtLogin: boolean;
 	    Theme: string;
 	    Hotkey: string;
+	    PaperTelegramToken: string;
+	    PaperTelegramChatID: string;
+	    PaperKeywords: string[];
+	    PaperCategories: string[];
+	    PaperDigestHour: number;
+	    NotifyPapers: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -458,6 +742,12 @@ export namespace main {
 	        this.LaunchAtLogin = source["LaunchAtLogin"];
 	        this.Theme = source["Theme"];
 	        this.Hotkey = source["Hotkey"];
+	        this.PaperTelegramToken = source["PaperTelegramToken"];
+	        this.PaperTelegramChatID = source["PaperTelegramChatID"];
+	        this.PaperKeywords = source["PaperKeywords"];
+	        this.PaperCategories = source["PaperCategories"];
+	        this.PaperDigestHour = source["PaperDigestHour"];
+	        this.NotifyPapers = source["NotifyPapers"];
 	    }
 	}
 	export class Stats {

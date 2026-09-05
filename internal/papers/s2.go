@@ -20,6 +20,12 @@ const S2Endpoint = "https://api.semanticscholar.org/graph/v1"
 // S2Fields is the field list requested for every paper object.
 const S2Fields = "title,abstract,year,venue,authors,citationCount,openAccessPdf,tldr,externalIds,url,publicationDate"
 
+// S2EdgeFields is S2Fields minus "tldr". The citations/references endpoints and
+// the recommendations API reject it outright with
+// `HTTP 400 Unrecognized or unsupported fields: [tldr]` — only /paper/search
+// and /paper/{id} serve tldr. Verified 2026-09-06.
+const S2EdgeFields = "title,abstract,year,venue,authors,citationCount,openAccessPdf,externalIds,url,publicationDate"
+
 // S2MaxRetries is how many times a 429 is retried before giving up.
 const S2MaxRetries = 3
 
@@ -103,7 +109,7 @@ func (c *S2) edge(ctx context.Context, id, kind string, limit int) ([]Paper, err
 	}
 	v := url.Values{}
 	v.Set("limit", strconv.Itoa(limit))
-	v.Set("fields", S2Fields)
+	v.Set("fields", S2EdgeFields)
 	body, err := c.get(ctx, S2Endpoint+"/paper/"+url.PathEscape(id)+"/"+kind+"?"+v.Encode())
 	if err != nil {
 		return nil, err
@@ -121,7 +127,7 @@ func (c *S2) Recommendations(ctx context.Context, positiveIDs []string, limit in
 	}
 	payload, _ := json.Marshal(map[string]any{"positivePaperIds": positiveIDs})
 	u := "https://api.semanticscholar.org/recommendations/v1/papers?" +
-		url.Values{"limit": {strconv.Itoa(limit)}, "fields": {S2Fields}}.Encode()
+		url.Values{"limit": {strconv.Itoa(limit)}, "fields": {S2EdgeFields}}.Encode()
 
 	body, err := c.do(ctx, http.MethodPost, u, payload)
 	if err != nil {

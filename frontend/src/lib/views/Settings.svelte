@@ -416,7 +416,9 @@
           <div class="field">
             <span class="lbl">Courses to sync</span>
             <div class="course-grid">
-              {#each $courses as c (c.ID)}
+              <!-- Negative ids are synthetic (the "Papers" pseudo-course, id -1).
+                   Canvas never syncs them, so a toggle here would do nothing. -->
+              {#each $courses.filter((c) => c.ID > 0) as c (c.ID)}
                 <label class="course-toggle">
                   <input type="checkbox" checked={c.Enabled} onchange={(e) => toggleCourse(c.ID, e.currentTarget.checked)} />
                   <span class="track"><span class="knob"></span></span>

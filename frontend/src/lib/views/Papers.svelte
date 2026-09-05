@@ -267,7 +267,11 @@
 
   /** Patch a library row locally, then push it to the backend (debounced). */
   function patch(p: LibraryPaper, fields: Partial<LibraryPaper>, immediate = false) {
-    const next = { ...p, ...fields } as LibraryPaper;
+    // Merge onto the row we currently hold, not the (possibly stale) `p` the
+    // each-block handed us: two edits inside the debounce window would
+    // otherwise make the second one drop the first.
+    const cur = library.find((x) => x.ID === p.ID) ?? p;
+    const next = { ...cur, ...fields } as LibraryPaper;
     library = library.map((x) => (x.ID === p.ID ? next : x));
     const existing = saveTimers.get(p.ID);
     if (existing) clearTimeout(existing);
