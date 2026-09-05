@@ -50,6 +50,25 @@ unsubmitted assignments/quizzes, plus announcements/grades notifications.
   install would instantly pay out for pre-existing state.
 - Accessories unlock at Lv 3/5/8 (bow/glasses/crown); size caps at +16% (Lv 5).
 
+## Arcade (2026-09-05, frontend-only)
+- `lib/games/` = shared engine (`engine.ts`: fixed-timestep rAF loop that stops
+  on unmount and auto-pauses on `visibilitychange`/blur, window-level `Keys`
+  attached only while a game runs, DPR canvas fit, mulberry32 PRNG, CSS-token
+  palette reader) + `sprites.ts` (pet/file/check drawn on canvas) + `scores.ts`
+  (localStorage `nussync.arcade.run` / `.merge`) + the two games. View is
+  `views/Arcade.svelte`, route `arcade`, sidebar item "Play", palette commands
+  "Play: Nibble Run"/"Play: Lecture Merge", easter egg = 5 pet clicks in 2s
+  (`pokePet()` in pet.ts). No Go changes, no assets, ~15 KB minified.
+- Nibble Run hurdles are the *real* unsubmitted deadlines (height by urgency,
+  overdue = wide + red); green gates must be ducked. Daily seed = local
+  YYYY-MM-DD so the order is stable all day; free play is random.
+- XP goes through the new `addXP(n, reason)` in pet.ts: +1 per collected file
+  capped at 30/run, +50 once a day for reaching Final in Lecture Merge.
+- Key events are normalised via `keyCode(e)` (`e.code`, falling back to
+  `e.key`) — synthetic/automated events arrive with an empty `code`.
+- Note: rAF is suspended while the dev Browser pane is hidden, so games look
+  frozen there; drive them from a real window when eyeballing feel.
+
 ## Theme (2026-09-05)
 - `initTheme()` is now idempotent and is called from `main.ts` **before**
   `mount()` so `data-theme` is on `<html>` pre-paint (no white flash in dark).
