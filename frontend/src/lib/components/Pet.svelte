@@ -3,7 +3,7 @@
    * The sidebar pet. Pure inline SVG + CSS animation — no assets, no library.
    * Mood, level and quips all come from ../pet.ts.
    */
-  import { bubble, level, levelProgress, mood, petName, say, xp } from '../pet';
+  import { bubble, level, levelProgress, mood, petName, pokePet, xp } from '../pet';
 
   let squashing = $state(false);
   let squashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -34,7 +34,8 @@
       squashing = true;
       squashTimer = setTimeout(() => (squashing = false), 320);
     });
-    say();
+    // Quips as before; five clicks inside two seconds opens the Arcade.
+    pokePet();
   }
 </script>
 

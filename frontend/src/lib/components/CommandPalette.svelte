@@ -12,6 +12,7 @@
   } from '../stores';
   import type { Route } from '../stores';
   import type { FileNode } from '../types';
+  import { playGame } from '../games/arcade';
   import { fileKind, fmtBytes, fuzzyScore } from '../util';
   import Icon from './Icon.svelte';
 
@@ -49,6 +50,7 @@
     { label: 'Go to Deadlines', icon: 'deadlines', route: 'deadlines' },
     { label: 'Go to Announcements', icon: 'announcements', route: 'announcements' },
     { label: 'Go to Grades', icon: 'grades', route: 'grades' },
+    { label: 'Go to Arcade', icon: 'gamepad', route: 'arcade' },
     { label: 'Go to Settings', icon: 'settings', route: 'settings' },
   ];
 
@@ -79,6 +81,22 @@
         selectedCourseID.set(0);
         navigate('files');
       },
+    },
+    {
+      key: 'cmd:play-run',
+      kind: 'command' as const,
+      label: 'Play: Nibble Run',
+      hint: 'Arcade',
+      icon: 'gamepad',
+      run: () => playGame('run-daily'),
+    },
+    {
+      key: 'cmd:play-merge',
+      kind: 'command' as const,
+      label: 'Play: Lecture Merge',
+      hint: 'Arcade',
+      icon: 'gamepad',
+      run: () => playGame('merge'),
     },
     {
       key: 'cmd:theme-light',

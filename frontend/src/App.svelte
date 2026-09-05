@@ -15,6 +15,7 @@
   } from './lib/stores';
   import { initPet } from './lib/pet';
   import Announcements from './lib/views/Announcements.svelte';
+  import Arcade from './lib/views/Arcade.svelte';
   import Deadlines from './lib/views/Deadlines.svelte';
   import Files from './lib/views/Files.svelte';
   import Grades from './lib/views/Grades.svelte';
@@ -27,6 +28,7 @@
     deadlines: 'Deadlines',
     announcements: 'Announcements',
     grades: 'Grades',
+    arcade: 'Arcade',
     settings: 'Settings',
   };
 
@@ -98,6 +100,8 @@
         <Announcements />
       {:else if $route === 'grades'}
         <Grades />
+      {:else if $route === 'arcade'}
+        <Arcade />
       {:else if $route === 'settings'}
         <Settings />
       {/if}

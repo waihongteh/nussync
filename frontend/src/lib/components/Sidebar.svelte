@@ -13,6 +13,7 @@
     { id: 'announcements', label: 'Announcements', icon: 'announcements' },
     { id: 'grades', label: 'Grades', icon: 'grades' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
+    { id: 'arcade', label: 'Play', icon: 'gamepad' },
   ];
 
   function badgeFor(id: Route): number {

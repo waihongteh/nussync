@@ -11,7 +11,7 @@
 
 import { derived, get, writable } from 'svelte/store';
 import { on } from './api';
-import { courseByID, deadlines, recentFiles, stats, syncStatus } from './stores';
+import { courseByID, deadlines, navigate, recentFiles, stats, syncStatus } from './stores';
 import type { Deadline } from './types';
 import { countdown, lsGet, lsSet } from './util';
 
@@ -104,6 +104,42 @@ function award(points: number) {
   xp.update((v) => v + points);
   persist();
   if (levelFor(get(xp)) > before) beProud();
+}
+
+/**
+ * Award xp from outside this module (the Arcade uses this). Levelling, the
+ * proud reaction and persistence all go through the same path as internal
+ * awards; `reason` is only for debugging.
+ */
+export function addXP(points: number, reason = ''): void {
+  const n = Math.floor(points);
+  if (n <= 0) return;
+  if (import.meta.env?.DEV && reason) console.debug(`[pet] +${n} xp (${reason})`);
+  award(n);
+}
+
+// -------------------------------------------------------------- easter egg
+
+const COMBO_WINDOW_MS = 2_000;
+const COMBO_CLICKS = 5;
+
+let pokeTimes: number[] = [];
+
+/**
+ * Handle a click on the pet: normally just a quip, but five clicks inside two
+ * seconds opens the Arcade.
+ */
+export function pokePet(): void {
+  const now = Date.now();
+  pokeTimes = pokeTimes.filter((t) => now - t < COMBO_WINDOW_MS);
+  pokeTimes.push(now);
+  if (pokeTimes.length >= COMBO_CLICKS) {
+    pokeTimes = [];
+    say('Fine. Arcade.');
+    navigate('arcade');
+    return;
+  }
+  say();
 }
 
 // ------------------------------------------------------------------- ticking

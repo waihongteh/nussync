@@ -20,7 +20,7 @@ import { lsGet, lsSet } from './util';
 
 // ------------------------------------------------------------------ routing
 
-export const ROUTES = ['home', 'files', 'deadlines', 'announcements', 'grades', 'settings'] as const;
+export const ROUTES = ['home', 'files', 'deadlines', 'announcements', 'grades', 'arcade', 'settings'] as const;
 export type Route = (typeof ROUTES)[number];
 
 export const route = writable<Route>('home');
