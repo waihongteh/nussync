@@ -1,79 +1,191 @@
 <script lang="ts">
-  import logo from './assets/images/logo-universal.png'
-  import {Greet} from '../wailsjs/go/main/App.js'
+  import CommandPalette from './lib/components/CommandPalette.svelte';
+  import Icon from './lib/components/Icon.svelte';
+  import Sidebar from './lib/components/Sidebar.svelte';
+  import Toasts from './lib/components/Toasts.svelte';
+  import {
+    initTheme,
+    loadAll,
+    navigate,
+    paletteOpen,
+    resolvedTheme,
+    route,
+    theme,
+    wireEvents,
+  } from './lib/stores';
+  import Announcements from './lib/views/Announcements.svelte';
+  import Deadlines from './lib/views/Deadlines.svelte';
+  import Files from './lib/views/Files.svelte';
+  import Grades from './lib/views/Grades.svelte';
+  import Home from './lib/views/Home.svelte';
+  import Settings from './lib/views/Settings.svelte';
 
-  let resultText: string = "Please enter your name below 👇"
-  let name: string
+  const TITLES: Record<string, string> = {
+    home: 'Home',
+    files: 'Files',
+    deadlines: 'Deadlines',
+    announcements: 'Announcements',
+    grades: 'Grades',
+    settings: 'Settings',
+  };
 
-  function greet(): void {
-    Greet(name).then(result => resultText = result)
+  initTheme();
+
+  $effect(() => {
+    const teardown = wireEvents();
+    void loadAll();
+    return teardown;
+  });
+
+  function onKeydown(e: KeyboardEvent) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      paletteOpen.update((v) => !v);
+      return;
+    }
+    if (mod && e.key === ',') {
+      e.preventDefault();
+      paletteOpen.set(false);
+      navigate('settings');
+      return;
+    }
+    if (e.key === 'Escape') {
+      paletteOpen.set(false);
+    }
+  }
+
+  function cycleTheme() {
+    theme.update((t) => (t === 'dark' ? 'light' : t === 'light' ? 'system' : 'dark'));
   }
 </script>
 
-<main>
-  <img alt="Wails logo" id="logo" src="{logo}">
-  <div class="result" id="result">{resultText}</div>
-  <div class="input-box" id="input">
-    <input autocomplete="off" bind:value={name} class="input" id="name" type="text"/>
-    <button class="btn" on:click={greet}>Greet</button>
-  </div>
-</main>
+<svelte:window onkeydown={onKeydown} />
+
+<div class="shell">
+  <Sidebar />
+
+  <main class="main">
+    <header class="topbar">
+      <h1 class="title">{TITLES[$route] ?? ''}</h1>
+      <div class="grow"></div>
+      <button class="search-trigger" onclick={() => paletteOpen.set(true)}>
+        <Icon name="search" size={13} />
+        <span>Search</span>
+        <kbd>Ctrl</kbd><kbd>K</kbd>
+      </button>
+      <button class="icon-btn" onclick={cycleTheme} title="Theme: {$theme}" aria-label="Toggle theme">
+        <Icon name={$theme === 'system' ? 'monitor' : $resolvedTheme === 'dark' ? 'moon' : 'sun'} size={14} />
+      </button>
+      <button class="icon-btn" onclick={() => navigate('settings')} title="Settings (Ctrl+,)" aria-label="Settings">
+        <Icon name="settings" size={14} />
+      </button>
+    </header>
+
+    <div class="content">
+      {#if $route === 'home'}
+        <Home />
+      {:else if $route === 'files'}
+        <Files />
+      {:else if $route === 'deadlines'}
+        <Deadlines />
+      {:else if $route === 'announcements'}
+        <Announcements />
+      {:else if $route === 'grades'}
+        <Grades />
+      {:else if $route === 'settings'}
+        <Settings />
+      {/if}
+    </div>
+  </main>
+</div>
+
+<CommandPalette />
+<Toasts />
 
 <style>
-
-  #logo {
-    display: block;
-    width: 50%;
-    height: 50%;
-    margin: auto;
-    padding: 10% 0 0;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
-    background-origin: content-box;
+  .shell {
+    display: flex;
+    height: 100%;
+    min-height: 0;
   }
 
-  .result {
-    height: 20px;
-    line-height: 20px;
-    margin: 1.5rem auto;
+  .main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
-  .input-box .btn {
-    width: 60px;
-    height: 30px;
-    line-height: 30px;
-    border-radius: 3px;
-    border: none;
-    margin: 0 0 0 20px;
-    padding: 0 8px;
-    cursor: pointer;
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: var(--topbar-h);
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    flex: none;
   }
 
-  .input-box .btn:hover {
-    background-image: linear-gradient(to top, #cfd9df 0%, #e2ebf0 100%);
-    color: #333333;
+  .title {
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
   }
 
-  .input-box .input {
-    border: none;
-    border-radius: 3px;
-    outline: none;
-    height: 30px;
-    line-height: 30px;
-    padding: 0 10px;
-    background-color: rgba(240, 240, 240, 1);
-    -webkit-font-smoothing: antialiased;
+  .grow {
+    flex: 1;
   }
 
-  .input-box .input:hover {
-    border: none;
-    background-color: rgba(255, 255, 255, 1);
+  .search-trigger {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 28px;
+    padding: 0 8px 0 9px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text-faint);
+    font-size: 12.5px;
+    transition: background var(--t), border-color var(--t), color var(--t);
   }
 
-  .input-box .input:focus {
-    border: none;
-    background-color: rgba(255, 255, 255, 1);
+  .search-trigger:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-strong);
+    color: var(--text-muted);
   }
 
+  .search-trigger kbd {
+    padding: 1px 4px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-subtle);
+    font-family: var(--font);
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  .icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    color: var(--text-faint);
+    transition: background var(--t), color var(--t);
+  }
+
+  .icon-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .content {
+    flex: 1;
+    min-height: 0;
+  }
 </style>

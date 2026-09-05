@@ -1,0 +1,269 @@
+/**
+ * Application state. Plain Svelte stores (not runes) so this can live in a
+ * `.ts` file and be imported from anywhere, including non-component modules.
+ */
+
+import { derived, get, writable } from 'svelte/store';
+import { api, emitLocal, errMsg, on } from './api';
+import type {
+  Announcement,
+  Course,
+  Deadline,
+  FileNode,
+  Grade,
+  Settings,
+  Stats,
+  SyncStatus,
+  ToastPayload,
+} from './types';
+import { lsGet, lsSet } from './util';
+
+// ------------------------------------------------------------------ routing
+
+export const ROUTES = ['home', 'files', 'deadlines', 'announcements', 'grades', 'settings'] as const;
+export type Route = (typeof ROUTES)[number];
+
+export const route = writable<Route>('home');
+
+export function navigate(to: Route) {
+  route.set(to);
+}
+
+// ------------------------------------------------------------------- toasts
+
+export interface Toast {
+  id: number;
+  level: 'info' | 'success' | 'error';
+  message: string;
+}
+
+let toastSeq = 0;
+export const toasts = writable<Toast[]>([]);
+
+export function toast(message: string, level: Toast['level'] = 'info', ttl = 4200) {
+  const id = ++toastSeq;
+  toasts.update((list) => [...list, { id, level, message }].slice(-5));
+  setTimeout(() => dismissToast(id), ttl);
+  return id;
+}
+
+export function dismissToast(id: number) {
+  toasts.update((list) => list.filter((t) => t.id !== id));
+}
+
+// -------------------------------------------------------------------- theme
+
+export const theme = writable<'system' | 'light' | 'dark'>(lsGet('nussync.theme', 'system'));
+export const resolvedTheme = writable<'light' | 'dark'>('light');
+
+let mql: MediaQueryList | undefined;
+
+function computeTheme() {
+  const t = get(theme);
+  const dark = t === 'dark' || (t === 'system' && !!mql?.matches);
+  resolvedTheme.set(dark ? 'dark' : 'light');
+  if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+  }
+}
+
+export function initTheme() {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    mql = window.matchMedia('(prefers-color-scheme: dark)');
+    mql.addEventListener('change', computeTheme);
+  }
+  theme.subscribe((t) => {
+    lsSet('nussync.theme', t);
+    computeTheme();
+  });
+}
+
+// ------------------------------------------------------------------ domain
+
+export const courses = writable<Course[]>([]);
+export const deadlines = writable<Deadline[]>([]);
+export const announcements = writable<Announcement[]>([]);
+export const grades = writable<Grade[]>([]);
+export const recentFiles = writable<FileNode[]>([]);
+export const stats = writable<Stats | null>(null);
+export const settings = writable<Settings | null>(null);
+
+export const syncStatus = writable<SyncStatus>({
+  Running: false,
+  Phase: 'idle',
+  Course: '',
+  Done: 0,
+  Total: 0,
+  CurrentFile: '',
+  LastRun: '',
+  LastError: '',
+  BytesDownloaded: 0,
+});
+
+/** Course filter applied to the Files view (0 = all courses). */
+export const selectedCourseID = writable<number>(0);
+
+/** Command palette visibility. */
+export const paletteOpen = writable(false);
+
+/** Every file in the tree of the currently loaded course(s), flattened. */
+export const flatFiles = writable<FileNode[]>([]);
+
+export const courseByID = derived(courses, ($courses) => {
+  const map = new Map<number, Course>();
+  for (const c of $courses) map.set(c.ID, c);
+  return map;
+});
+
+export const unreadAnnouncements = derived(announcements, ($a) => $a.filter((x) => !x.Read).length);
+
+export const upcomingCount = derived(deadlines, ($d) => {
+  const now = Date.now();
+  return $d.filter((x) => !x.Submitted && Date.parse(x.DueAt) > now).length;
+});
+
+// ------------------------------------------------------------------ loaders
+
+async function guard<T>(label: string, fn: () => Promise<T>, set?: (v: T) => void) {
+  try {
+    const v = await fn();
+    set?.(v);
+    return v;
+  } catch (err) {
+    console.error(`[stores] ${label} failed`, err);
+    toast(`${label} failed: ${errMsg(err)}`, 'error');
+    return undefined;
+  }
+}
+
+export const loadCourses = () => guard('Load courses', () => api.getCourses(), (v) => courses.set(v ?? []));
+export const loadDeadlines = () => guard('Load deadlines', () => api.getDeadlines(), (v) => deadlines.set(v ?? []));
+export const loadAnnouncements = () =>
+  guard('Load announcements', () => api.getAnnouncements(50), (v) => announcements.set(v ?? []));
+export const loadGrades = () => guard('Load grades', () => api.getGrades(), (v) => grades.set(v ?? []));
+export const loadRecent = () => guard('Load recent files', () => api.getRecentFiles(10), (v) => recentFiles.set(v ?? []));
+export const loadStats = () => guard('Load stats', () => api.getStats(), (v) => stats.set(v ?? null));
+export const loadSettings = () =>
+  guard('Load settings', () => api.getSettings(), (v) => {
+    if (!v) return;
+    settings.set(v);
+    if (v.Theme === 'light' || v.Theme === 'dark' || v.Theme === 'system') theme.set(v.Theme);
+  });
+
+export async function loadAll() {
+  await Promise.all([
+    loadCourses(),
+    loadDeadlines(),
+    loadAnnouncements(),
+    loadGrades(),
+    loadRecent(),
+    loadStats(),
+    loadSettings(),
+  ]);
+  await guard('Read sync status', () => api.getSyncStatus(), (v) => v && syncStatus.set(v));
+}
+
+export async function syncNow() {
+  if (get(syncStatus).Running) return;
+  try {
+    await api.syncNow();
+  } catch (err) {
+    toast(`Sync failed to start: ${errMsg(err)}`, 'error');
+  }
+}
+
+export async function cancelSync() {
+  try {
+    await api.cancelSync();
+  } catch (err) {
+    toast(errMsg(err), 'error');
+  }
+}
+
+/** Open a local file, or nudge the user to sync when it is not downloaded. */
+export async function openFileNode(f: FileNode) {
+  if (!f.Synced) {
+    toast('Sync to download', 'info');
+    return;
+  }
+  try {
+    await api.openFile(f.Path);
+  } catch (err) {
+    toast(`Could not open ${f.Name}: ${errMsg(err)}`, 'error');
+  }
+}
+
+export async function openExternal(url: string) {
+  if (!url) return;
+  try {
+    await api.openURL(url);
+  } catch (err) {
+    toast(errMsg(err), 'error');
+  }
+}
+
+// ------------------------------------------------------------------- events
+
+let wired = false;
+
+/** Subscribe to backend events once, at app start. Returns a teardown fn. */
+export function wireEvents(): () => void {
+  if (wired) return () => {};
+  wired = true;
+  const offs: Array<() => void> = [];
+
+  offs.push(
+    on('sync:status', (s: SyncStatus) => {
+      if (s) syncStatus.set(s);
+    }),
+  );
+
+  offs.push(
+    on('sync:done', (s: SyncStatus) => {
+      if (s) syncStatus.set(s);
+      void loadCourses();
+      void loadRecent();
+      void loadStats();
+      void loadDeadlines();
+    }),
+  );
+
+  offs.push(
+    on('deadlines:updated', () => {
+      void loadDeadlines();
+    }),
+  );
+
+  offs.push(
+    on('announcements:new', (items: Announcement[]) => {
+      void loadAnnouncements();
+      const n = Array.isArray(items) ? items.length : 0;
+      if (n > 0) toast(`${n} new announcement${n === 1 ? '' : 's'}`, 'info');
+    }),
+  );
+
+  offs.push(
+    on('toast', (p: ToastPayload) => {
+      if (!p?.Message) return;
+      const level = p.Level === 'success' || p.Level === 'error' ? p.Level : 'info';
+      toast(p.Message, level);
+    }),
+  );
+
+  return () => {
+    offs.forEach((off) => {
+      try {
+        off();
+      } catch {
+        /* ignore */
+      }
+    });
+    wired = false;
+  };
+}
+
+/** Raise a toast through the same path the backend uses (handy for tests). */
+export function emitToast(message: string, level: ToastPayload['Level'] = 'info') {
+  emitLocal('toast', { Level: level, Message: message });
+}
