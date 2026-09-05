@@ -33,18 +33,32 @@ type App struct {
 
 	st        *store.Store
 	sched     *notify.Scheduler
+	bot       *notify.Bot
 	syncMu    gosync.Mutex
 	syncing   bool
 	cancelFn  context.CancelFunc
 	lastEmit  time.Time
 	timerStop chan struct{}
 
+	// hotkeyThread is the locked OS thread id owning the RegisterHotKey message
+	// loop (Windows only, 0 when no hotkey is registered).
+	hotkeyThread uint32
+	// windowVisible tracks show/hide ourselves: the Wails runtime exposes
+	// minimised/maximised but no "is visible", and the hotkey has to toggle.
+	windowVisible bool
+	// trayRefresh is installed by the tray so a finished sync can redraw the
+	// next-deadlines section of its menu.
+	trayRefresh func()
+	// lastSummary is the one-line result of the most recent sync, replayed to
+	// the Telegram /sync command.
+	lastSummary string
+
 	headless bool // CLI mode: no Wails runtime available
 }
 
 // NewApp creates the App.
 func NewApp() *App {
-	return &App{status: SyncStatus{Phase: "idle"}}
+	return &App{status: SyncStatus{Phase: "idle"}, windowVisible: true}
 }
 
 // ---------------------------------------------------------------- lifecycle
@@ -99,7 +113,14 @@ func (a *App) startup(ctx context.Context) {
 	a.sched = notify.NewScheduler(a.st, a.telegram, cfg)
 	a.sched.Start(ctx)
 
+	// One getUpdates consumer for the whole process; PairTelegram waits on it.
+	a.bot = notify.NewBot(a.st, a.telegram, cfg)
+	a.bot.Sync = a.telegramSync
+	a.bot.OnPair = func(chatID string) { _, _ = a.savePairedChat(chatID) }
+	a.bot.Start(ctx)
+
 	a.applyLaunchAtLogin(cfg.LaunchAtLogin)
+	a.applyHotkey(cfg.Hotkey)
 	a.restartSyncTimer(cfg.SyncIntervalMin)
 
 	// Kick off an initial sync shortly after launch.
@@ -120,6 +141,10 @@ func (a *App) shutdown(context.Context) {
 	if a.sched != nil {
 		a.sched.Stop()
 	}
+	if a.bot != nil {
+		a.bot.Stop()
+	}
+	a.stopHotkey()
 	a.stopSyncTimer()
 	if a.st != nil {
 		_ = a.st.Close()
@@ -184,6 +209,7 @@ func (a *App) GetTree(courseID int) ([]FileNode, error) {
 		return nil, err
 	}
 	syncDir := a.settings().SyncDir
+	seen := a.st.FeedSeenAt()
 
 	if courseID != 0 {
 		files, err := a.st.FilesByCourse(courseID)
@@ -197,7 +223,7 @@ func (a *App) GetTree(courseID int) ([]FileNode, error) {
 				break
 			}
 		}
-		return BuildTree(courseID, filepath.Join(syncDir, sync.CourseFolder(code)), files), nil
+		return BuildTree(courseID, filepath.Join(syncDir, sync.CourseFolder(code)), files, seen), nil
 	}
 
 	out := make([]FileNode, 0, len(courses))
@@ -210,7 +236,7 @@ func (a *App) GetTree(courseID int) ([]FileNode, error) {
 			continue
 		}
 		root := filepath.Join(syncDir, sync.CourseFolder(c.Code))
-		children := BuildTree(c.ID, root, files)
+		children := BuildTree(c.ID, root, files, seen)
 		var size int64
 		for _, ch := range children {
 			size += ch.Size
@@ -233,9 +259,10 @@ func (a *App) GetRecentFiles(limit int) ([]FileNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	seen := a.st.FeedSeenAt()
 	out := make([]FileNode, 0, len(files))
 	for _, f := range files {
-		out = append(out, toFileNode(f))
+		out = append(out, toFileNode(f, seen))
 	}
 	return out, nil
 }
@@ -250,10 +277,11 @@ func (a *App) Search(query string, courseID int) ([]SearchHit, error) {
 	if err != nil {
 		return nil, err
 	}
+	seen := a.st.FeedSeenAt()
 	out := make([]SearchHit, 0, len(hits))
 	for _, h := range hits {
 		out = append(out, SearchHit{
-			File:       toFileNode(h.File),
+			File:       toFileNode(h.File, seen),
 			CourseCode: h.CourseCode,
 			Snippet:    h.Snippet,
 			Score:      h.Score,
@@ -384,14 +412,69 @@ func (a *App) runSync(ctx context.Context, cfg config.Settings) {
 				}
 			}
 		}
-		a.toast("success", fmt.Sprintf("Synced %d files (%s)",
-			res.FilesDownloaded, humanBytes(res.BytesDownloaded)))
+		summary := fmt.Sprintf("Synced %d files (%s)",
+			res.FilesDownloaded, humanBytes(res.BytesDownloaded))
+		a.mu.Lock()
+		a.lastSummary = summary
+		a.mu.Unlock()
+		a.toast("success", summary)
+
+		// What's-new feed: badge count for the UI, Windows toast for the desktop.
+		if n, e := a.st.UnseenCount(); e == nil {
+			a.emit("feed:updated", n)
+		}
+		if res.NewFiles > 0 {
+			a.notifyNewFiles(res.NewFiles, res.NewByCourse)
+		}
 	} else if !errors.Is(err, context.Canceled) {
+		a.mu.Lock()
+		a.lastSummary = "Sync failed: " + err.Error()
+		a.mu.Unlock()
 		a.toast("error", "Sync failed: "+err.Error())
 	}
 
 	if a.sched != nil {
 		a.sched.Kick()
+	}
+	a.refreshTray()
+}
+
+// refreshTray asks the tray to redraw its next-deadlines section, if present.
+func (a *App) refreshTray() {
+	a.mu.RLock()
+	fn := a.trayRefresh
+	a.mu.RUnlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// telegramSync runs a sync for the /sync bot command and waits for a summary.
+func (a *App) telegramSync(ctx context.Context) (string, error) {
+	if err := a.SyncNow(); err != nil {
+		return "", err
+	}
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-t.C:
+		}
+		a.syncMu.Lock()
+		running := a.syncing
+		a.syncMu.Unlock()
+		if running {
+			continue
+		}
+		a.mu.RLock()
+		summary := a.lastSummary
+		a.mu.RUnlock()
+		if summary == "" {
+			summary = "Sync finished."
+		}
+		return summary, nil
 	}
 }
 
@@ -500,6 +583,181 @@ func (a *App) GetGrades() ([]Grade, error) {
 	return out, nil
 }
 
+// ------------------------------------------------------------------- window
+
+// ShowWindow brings the main window to the front (tray click, toast click).
+func (a *App) ShowWindow() {
+	if a.headless || a.ctx == nil {
+		return
+	}
+	wruntime.WindowShow(a.ctx)
+	wruntime.WindowUnminimise(a.ctx)
+	a.mu.Lock()
+	a.windowVisible = true
+	a.mu.Unlock()
+}
+
+// HideWindow hides the main window to the tray.
+func (a *App) HideWindow() {
+	if a.headless || a.ctx == nil {
+		return
+	}
+	wruntime.WindowHide(a.ctx)
+	a.mu.Lock()
+	a.windowVisible = false
+	a.mu.Unlock()
+}
+
+// ToggleWindow is what the global hotkey fires. Wails v2 has no "is visible"
+// query, so visibility is tracked here instead; a minimised window counts as
+// hidden so the hotkey restores rather than hides it.
+func (a *App) ToggleWindow() {
+	if a.headless || a.ctx == nil {
+		return
+	}
+	a.mu.RLock()
+	visible := a.windowVisible
+	a.mu.RUnlock()
+	if visible && !wruntime.WindowIsMinimised(a.ctx) {
+		a.HideWindow()
+		return
+	}
+	a.ShowWindow()
+}
+
+// -------------------------------------------------------- what's-new feed
+
+// GetWhatsNew lists files added or changed in the last sinceDays days, newest
+// first. sinceDays <= 0 defaults to 7.
+func (a *App) GetWhatsNew(sinceDays int) ([]FeedItem, error) {
+	if a.st == nil {
+		return nil, errors.New("not initialised")
+	}
+	if sinceDays <= 0 {
+		sinceDays = 7
+	}
+	rows, err := a.st.ChangedFiles(time.Now().AddDate(0, 0, -sinceDays), 500)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FeedItem, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toFeedItem(r))
+	}
+	return out, nil
+}
+
+// MarkFeedSeen stamps the feed as read; GetUnseenCount then returns 0.
+func (a *App) MarkFeedSeen() error {
+	if a.st == nil {
+		return errors.New("not initialised")
+	}
+	if err := a.st.MarkFeedSeen(time.Now()); err != nil {
+		return err
+	}
+	a.emit("feed:updated", 0)
+	return nil
+}
+
+// GetUnseenCount counts files changed since the feed was last marked seen.
+func (a *App) GetUnseenCount() (int, error) {
+	if a.st == nil {
+		return 0, errors.New("not initialised")
+	}
+	return a.st.UnseenCount()
+}
+
+// ------------------------------------------------------- assignment detail
+
+// assignmentCacheTTL bounds how stale a cached description / score statistics
+// block may be before GetDeadlineDetail refetches it from Canvas.
+const assignmentCacheTTL = 6 * time.Hour
+
+// GetDeadlineDetail returns one deadline enriched with its Canvas description,
+// submission types, the synced files linked from that description, the user's
+// score, and — for graded assignments Canvas discloses statistics for — the
+// class score distribution. The Canvas round-trip is cached for 6h.
+func (a *App) GetDeadlineDetail(id int) (Deadline, error) {
+	if a.st == nil {
+		return Deadline{}, errors.New("not initialised")
+	}
+	row, ok, err := a.st.DeadlineByID(id)
+	if err != nil {
+		return Deadline{}, err
+	}
+	if !ok {
+		return Deadline{}, fmt.Errorf("deadline %d not found", id)
+	}
+	out := toDeadline(row)
+
+	det, cached, err := a.st.AssignmentDetailGet(id)
+	if err != nil {
+		return out, err
+	}
+	fresh := false
+	if cached && det.FetchedAt != "" {
+		if t, e := time.Parse(time.RFC3339, det.FetchedAt); e == nil {
+			fresh = time.Since(t) < assignmentCacheTTL
+		}
+	}
+
+	if !fresh && strings.TrimSpace(a.settings().CanvasToken) != "" {
+		ctx, cancel := context.WithTimeout(a.baseCtx(), 30*time.Second)
+		asn, ferr := a.canvasClient().AssignmentDetail(ctx, row.CourseID, id)
+		cancel()
+		if ferr == nil {
+			det = store.AssignmentDetail{
+				AssignmentID:    id,
+				CourseID:        row.CourseID,
+				Description:     asn.Description,
+				SubmissionTypes: asn.SubmissionTypes,
+			}
+			if sub := asn.Submission; sub != nil {
+				det.Graded = sub.WorkflowState == "graded" && sub.Score != nil
+				if sub.Score != nil {
+					det.Score = *sub.Score
+				}
+			}
+			// Canvas only returns score_statistics for graded assignments.
+			if st := asn.ScoreStatistics; st != nil && det.Graded {
+				det.Stats = &store.ScoreStats{
+					Mean: st.Mean, Min: st.Min, Max: st.Max,
+					Median: st.Median, Count: st.Count,
+				}
+			}
+			if e := a.st.AssignmentDetailPut(det); e != nil {
+				log.Printf("nussync: cache assignment %d: %v", id, e)
+			}
+		} else if !cached {
+			// Nothing cached and Canvas is unreachable: return the bare row.
+			return out, nil
+		}
+	}
+
+	out.Description = det.Description
+	out.SubmissionTypes = det.SubmissionTypes
+	out.Score = det.Score
+	out.Graded = det.Graded
+	if det.Stats != nil {
+		out.Stats = &ScoreStats{
+			Mean: det.Stats.Mean, Min: det.Stats.Min, Max: det.Stats.Max,
+			Median: det.Stats.Median, Count: det.Stats.Count,
+		}
+	}
+
+	// Attachments: file ids linked from the description that we already synced.
+	if ids := sync.FileIDsInHTML(det.Description); len(ids) > 0 {
+		files, e := a.st.FilesByIDs(ids)
+		if e == nil {
+			seen := a.st.FeedSeenAt()
+			for _, f := range files {
+				out.Attachments = append(out.Attachments, toFileNode(f, seen))
+			}
+		}
+	}
+	return out, nil
+}
+
 // ----------------------------------------------------------------- settings
 
 // GetSettings returns the current configuration.
@@ -520,6 +778,7 @@ func (a *App) SaveSettings(s Settings) error {
 	}
 
 	a.mu.Lock()
+	prevHotkey := a.cfg.Hotkey
 	a.cfg = saved
 	a.canvas = canvas.New(saved.CanvasURL, saved.CanvasToken)
 	a.telegram = telegram.New(saved.TelegramToken)
@@ -529,7 +788,14 @@ func (a *App) SaveSettings(s Settings) error {
 	if a.sched != nil {
 		a.sched.SetSettings(saved, tg)
 	}
+	if a.bot != nil {
+		a.bot.SetConfig(saved, tg)
+	}
 	a.applyLaunchAtLogin(saved.LaunchAtLogin)
+	if saved.Hotkey != prevHotkey {
+		// Unregister the old combination before claiming the new one.
+		a.applyHotkey(saved.Hotkey)
+	}
 	a.restartSyncTimer(saved.SyncIntervalMin)
 	return nil
 }
@@ -599,6 +865,17 @@ func (a *App) PairTelegram() (string, error) {
 	ctx, cancel := context.WithTimeout(a.baseCtx(), 65*time.Second)
 	defer cancel()
 
+	// Telegram hands each update to exactly one getUpdates caller, so when the
+	// command bot's poll loop is alive it must stay the only consumer: wait for
+	// it to see the /start instead of polling in parallel.
+	if a.bot != nil && a.bot.Running() {
+		if id := a.bot.AwaitPair(ctx, 60*time.Second); id != "" {
+			return a.savePairedChat(id)
+		}
+		return "", errors.New("telegram: no /start received (send /start to @" +
+			telegram.BotUsername + ")")
+	}
+
 	chatID, err := tg.FindExistingChat(ctx)
 	if err == nil && chatID != "" {
 		return a.savePairedChat(chatID)
@@ -622,6 +899,9 @@ func (a *App) savePairedChat(chatID string) (string, error) {
 	}
 	if a.sched != nil {
 		a.sched.SetSettings(cfg, tg)
+	}
+	if a.bot != nil {
+		a.bot.SetConfig(cfg, tg)
 	}
 	return chatID, nil
 }

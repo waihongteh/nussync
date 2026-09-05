@@ -76,7 +76,9 @@ CREATE TABLE IF NOT EXISTS files (
   content_hash TEXT NOT NULL DEFAULT '',
   indexed      INTEGER NOT NULL DEFAULT 0,
   url          TEXT NOT NULL DEFAULT '',
-  origin       TEXT NOT NULL DEFAULT ''
+  origin       TEXT NOT NULL DEFAULT '',
+  first_seen_at   TEXT NOT NULL DEFAULT '',
+  last_changed_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_files_course ON files(course_id);
 CREATE INDEX IF NOT EXISTS idx_files_modified ON files(modified_at DESC);
@@ -143,6 +145,24 @@ CREATE TABLE IF NOT EXISTS pages (
   PRIMARY KEY (course_id, url)
 );
 
+-- Lazily fetched assignment detail + class score statistics (see
+-- GetDeadlineDetail). Refreshed when older than assignmentCacheTTL.
+CREATE TABLE IF NOT EXISTS assignment_cache (
+  assignment_id    INTEGER PRIMARY KEY,
+  course_id        INTEGER NOT NULL DEFAULT 0,
+  description      TEXT NOT NULL DEFAULT '',
+  submission_types TEXT NOT NULL DEFAULT '',
+  score            REAL NOT NULL DEFAULT 0,
+  graded           INTEGER NOT NULL DEFAULT 0,
+  has_stats        INTEGER NOT NULL DEFAULT 0,
+  stat_mean        REAL NOT NULL DEFAULT 0,
+  stat_min         REAL NOT NULL DEFAULT 0,
+  stat_max         REAL NOT NULL DEFAULT 0,
+  stat_median      REAL NOT NULL DEFAULT 0,
+  stat_count       INTEGER NOT NULL DEFAULT 0,
+  fetched_at       TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS kv (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL DEFAULT ''
@@ -157,6 +177,14 @@ func (s *Store) migrate() error {
 	// CREATE TABLE IF NOT EXISTS above does nothing for pre-existing databases.
 	if err := s.addColumn("files", "origin", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return fmt.Errorf("store: migrate files.origin: %w", err)
+	}
+	// Added 2026-09: what's-new feed. first_seen_at is stamped once, on the
+	// first successful download; last_changed_at is re-stamped every time the
+	// file is re-downloaded because Canvas reported it changed.
+	for _, col := range []string{"first_seen_at", "last_changed_at"} {
+		if err := s.addColumn("files", col, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("store: migrate files.%s: %w", col, err)
+		}
 	}
 	return nil
 }

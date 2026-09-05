@@ -38,7 +38,9 @@ func toCourse(c store.Course) Course {
 	}
 }
 
-func toFileNode(f store.File) FileNode {
+// toFileNode maps a store row. seenAt is the feed_seen_at stamp; a file whose
+// last_changed_at is newer is flagged IsNew so the Files view can badge it.
+func toFileNode(f store.File, seenAt string) FileNode {
 	return FileNode{
 		ID:         f.ID,
 		CourseID:   f.CourseID,
@@ -51,6 +53,27 @@ func toFileNode(f store.File) FileNode {
 		Source:     f.Source,
 		Module:     f.Module,
 		Synced:     f.Synced,
+		IsNew:      f.LastChangedAt != "" && f.LastChangedAt > seenAt,
+	}
+}
+
+// toFeedItem maps one what's-new row.
+func toFeedItem(ff store.FeedFile) FeedItem {
+	kind := "updated"
+	if ff.New {
+		kind = "new"
+	}
+	return FeedItem{
+		ID:         ff.File.ID,
+		CourseID:   ff.File.CourseID,
+		CourseCode: ff.CourseCode,
+		Name:       ff.File.Name,
+		Path:       ff.File.AbsPath,
+		RelPath:    ff.File.RelPath,
+		Size:       ff.File.Size,
+		ChangedAt:  ff.ChangedAt,
+		Kind:       kind,
+		Module:     ff.File.Module,
 	}
 }
 
@@ -89,6 +112,7 @@ func toGrade(g store.Grade) Grade {
 		Possible:   g.Possible,
 		GradedAt:   g.GradedAt,
 		URL:        g.URL,
+		Mean:       g.Mean,
 	}
 }
 
@@ -105,8 +129,10 @@ func toSettings(c config.Settings) Settings {
 		SyncIntervalMin:     c.SyncIntervalMin,
 		NotifyAnnouncements: c.NotifyAnnouncements,
 		NotifyGrades:        c.NotifyGrades,
+		NotifyDesktop:       c.NotifyDesktop,
 		LaunchAtLogin:       c.LaunchAtLogin,
 		Theme:               c.Theme,
+		Hotkey:              c.Hotkey,
 	}
 }
 
@@ -123,14 +149,16 @@ func fromSettings(s Settings) config.Settings {
 		SyncIntervalMin:     s.SyncIntervalMin,
 		NotifyAnnouncements: s.NotifyAnnouncements,
 		NotifyGrades:        s.NotifyGrades,
+		NotifyDesktop:       s.NotifyDesktop,
 		LaunchAtLogin:       s.LaunchAtLogin,
 		Theme:               s.Theme,
+		Hotkey:              s.Hotkey,
 	}
 }
 
 // BuildTree turns a flat file list into a nested directory tree, using each
 // file's RelPath (forward slashes) relative to the course root.
-func BuildTree(courseID int, root string, files []store.File) []FileNode {
+func BuildTree(courseID int, root string, files []store.File, seenAt string) []FileNode {
 	type dirNode struct {
 		node     *FileNode
 		children map[string]*dirNode
@@ -171,7 +199,7 @@ func BuildTree(courseID int, root string, files []store.File) []FileNode {
 			}
 			cur = child
 		}
-		cur.files = append(cur.files, toFileNode(f))
+		cur.files = append(cur.files, toFileNode(f, seenAt))
 	}
 
 	var collect func(d *dirNode) []FileNode

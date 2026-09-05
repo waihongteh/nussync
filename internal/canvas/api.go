@@ -135,6 +135,17 @@ func (c *Client) Assignments(ctx context.Context, courseID int) ([]Assignment, e
 	return out, err
 }
 
+// AssignmentDetail fetches one assignment including the user's submission and,
+// when Canvas is willing to disclose it, the class score statistics. Courses
+// that hide statistics simply return no score_statistics object.
+func (c *Client) AssignmentDetail(ctx context.Context, courseID, assignmentID int) (Assignment, error) {
+	var a Assignment
+	err := c.getJSON(ctx, fmt.Sprintf(
+		"/api/v1/courses/%d/assignments/%d?include[]=score_statistics&include[]=submission",
+		courseID, assignmentID), &a)
+	return a, err
+}
+
 // Announcements lists announcement discussion topics for a course.
 func (c *Client) Announcements(ctx context.Context, courseID int) ([]DiscussionTopic, error) {
 	var out []DiscussionTopic

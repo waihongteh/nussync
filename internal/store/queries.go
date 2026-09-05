@@ -87,19 +87,27 @@ func (s *Store) EnabledCourses() ([]Course, error) {
 func (s *Store) UpsertFile(f File) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// first_seen_at is write-once; last_changed_at only moves forward when the
+	// caller supplies one (an unchanged re-upsert passes "" and keeps the old
+	// stamp). Rows written before the feed existed keep their empty stamps.
 	_, err := s.db.Exec(`
 		INSERT INTO files(id, course_id, name, rel_path, abs_path, size, modified_at,
-		                  updated_at, source, module, synced, content_hash, indexed, url, origin)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		                  updated_at, source, module, synced, content_hash, indexed, url, origin,
+		                  first_seen_at, last_changed_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			course_id=excluded.course_id, name=excluded.name, rel_path=excluded.rel_path,
 			abs_path=excluded.abs_path, size=excluded.size, modified_at=excluded.modified_at,
 			updated_at=excluded.updated_at, source=excluded.source, module=excluded.module,
 			synced=excluded.synced, content_hash=excluded.content_hash,
-			indexed=excluded.indexed, url=excluded.url, origin=excluded.origin`,
+			indexed=excluded.indexed, url=excluded.url, origin=excluded.origin,
+			first_seen_at=CASE WHEN COALESCE(files.first_seen_at,'')=''
+			                   THEN excluded.first_seen_at ELSE files.first_seen_at END,
+			last_changed_at=CASE WHEN COALESCE(excluded.last_changed_at,'')=''
+			                     THEN files.last_changed_at ELSE excluded.last_changed_at END`,
 		f.ID, f.CourseID, f.Name, f.RelPath, f.AbsPath, f.Size, f.ModifiedAt,
 		f.UpdatedAt, f.Source, f.Module, b2i(f.Synced), f.ContentHash, b2i(f.Indexed),
-		f.URL, f.Origin)
+		f.URL, f.Origin, f.FirstSeenAt, f.LastChangedAt)
 	return err
 }
 
@@ -119,7 +127,8 @@ func (s *Store) FileByID(id int) (File, bool, error) {
 
 const fileSelect = `SELECT id, course_id, name, rel_path, abs_path, size, modified_at,
        updated_at, source, module, synced, content_hash, indexed, url,
-       COALESCE(origin,'') FROM files`
+       COALESCE(origin,''), COALESCE(first_seen_at,''), COALESCE(last_changed_at,'')
+       FROM files`
 
 func scanFiles(rows *sql.Rows) ([]File, error) {
 	var out []File
@@ -128,7 +137,7 @@ func scanFiles(rows *sql.Rows) ([]File, error) {
 		var synced, indexed int
 		if err := rows.Scan(&f.ID, &f.CourseID, &f.Name, &f.RelPath, &f.AbsPath, &f.Size,
 			&f.ModifiedAt, &f.UpdatedAt, &f.Source, &f.Module, &synced, &f.ContentHash,
-			&indexed, &f.URL, &f.Origin); err != nil {
+			&indexed, &f.URL, &f.Origin, &f.FirstSeenAt, &f.LastChangedAt); err != nil {
 			return nil, err
 		}
 		f.Synced = synced != 0
@@ -388,9 +397,7 @@ func (s *Store) UpsertGrade(g Grade) (bool, error) {
 
 // Grades lists graded submissions newest first.
 func (s *Store) Grades() ([]Grade, error) {
-	rows, err := s.db.Query(`
-		SELECT assignment_id, course_id, course_code, title, score, possible, graded_at, url, notified
-		FROM grades ORDER BY graded_at DESC`)
+	rows, err := s.db.Query(gradeSelect + ` ORDER BY g.graded_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -400,9 +407,7 @@ func (s *Store) Grades() ([]Grade, error) {
 
 // UnnotifiedGrades lists grades not yet pushed to Telegram.
 func (s *Store) UnnotifiedGrades() ([]Grade, error) {
-	rows, err := s.db.Query(`
-		SELECT assignment_id, course_id, course_code, title, score, possible, graded_at, url, notified
-		FROM grades WHERE notified=0 ORDER BY graded_at ASC`)
+	rows, err := s.db.Query(gradeSelect + ` WHERE g.notified=0 ORDER BY g.graded_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -410,13 +415,21 @@ func (s *Store) UnnotifiedGrades() ([]Grade, error) {
 	return scanGrades(rows)
 }
 
+// gradeSelect joins the cached class mean (0 when the assignment detail has
+// never been fetched) onto every grade row.
+const gradeSelect = `
+	SELECT g.assignment_id, g.course_id, g.course_code, g.title, g.score, g.possible,
+	       g.graded_at, g.url, g.notified,
+	       COALESCE(CASE WHEN ac.has_stats=1 THEN ac.stat_mean END, 0)
+	FROM grades g LEFT JOIN assignment_cache ac ON ac.assignment_id = g.assignment_id`
+
 func scanGrades(rows *sql.Rows) ([]Grade, error) {
 	var out []Grade
 	for rows.Next() {
 		var g Grade
 		var n int
 		if err := rows.Scan(&g.AssignmentID, &g.CourseID, &g.CourseCode, &g.Title,
-			&g.Score, &g.Possible, &g.GradedAt, &g.URL, &n); err != nil {
+			&g.Score, &g.Possible, &g.GradedAt, &g.URL, &n, &g.Mean); err != nil {
 			return nil, err
 		}
 		g.Notified = n != 0

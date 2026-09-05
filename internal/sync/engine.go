@@ -52,6 +52,22 @@ type Result struct {
 	// toasts on these; the Telegram scheduler has its own `notified` flag, so
 	// an unpaired bot must not make every sync re-announce the whole backlog.
 	NewAnnouncementIDs []int
+
+	// NewFiles counts files downloaded for the very first time this run, and
+	// NewByCourse breaks that down by course code. Files re-downloaded because
+	// Canvas changed them are NOT counted here — the desktop toast says "new".
+	NewFiles    int
+	NewByCourse map[string]int
+}
+
+// addNewFile records a first-time download for the toast summary. Callers hold
+// the download mutex.
+func (r *Result) addNewFile(code string) {
+	r.NewFiles++
+	if r.NewByCourse == nil {
+		r.NewByCourse = map[string]int{}
+	}
+	r.NewByCourse[code]++
 }
 
 // Engine performs one sync at a time.
@@ -288,6 +304,9 @@ func (e *Engine) syncCourse(ctx context.Context, c store.Course, res *Result) er
 	type job struct {
 		cand candidate
 		row  store.File
+		// firstSeen is true when this file id has never been downloaded before,
+		// which is what the what's-new feed and the desktop toast call "new".
+		firstSeen bool
 	}
 	var jobs []job
 	ids := make([]int, 0, len(cands))
@@ -348,6 +367,8 @@ func (e *Engine) syncCourse(ctx context.Context, c store.Course, res *Result) er
 			row.ContentHash = prev.ContentHash
 			row.Indexed = prev.Indexed
 			row.Synced = true
+			// Leave FirstSeenAt/LastChangedAt empty: UpsertFile preserves the
+			// stored stamps when the caller supplies none.
 			_ = e.Store.UpsertFile(row)
 		}
 		if need {
@@ -355,7 +376,13 @@ func (e *Engine) syncCourse(ctx context.Context, c store.Course, res *Result) er
 				row.ContentHash = ""
 				row.Indexed = false
 			}
-			jobs = append(jobs, job{cand: cd, row: row})
+			// Stamp the feed columns. first_seen_at is write-once in SQL, so
+			// sending it on every download is harmless; last_changed_at always
+			// moves to now, which is exactly "this file changed just now".
+			stamp := rfc(time.Now())
+			row.FirstSeenAt = stamp
+			row.LastChangedAt = stamp
+			jobs = append(jobs, job{cand: cd, row: row, firstSeen: !ok || !prev.Synced || prev.FirstSeenAt == ""})
 		}
 	}
 
@@ -401,6 +428,9 @@ func (e *Engine) syncCourse(ctx context.Context, c store.Course, res *Result) er
 					}
 					res.FilesDownloaded++
 					res.BytesDownloaded += n
+					if j.firstSeen {
+						res.addNewFile(c.Code)
+					}
 					_ = e.Store.UpsertFile(j.row)
 				} else if !errors.Is(err, context.Canceled) {
 					res.Errors = append(res.Errors, fmt.Sprintf("%s %s: %v", c.Code, j.row.Name, err))

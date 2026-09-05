@@ -95,7 +95,7 @@ func (c *Client) SendMessage(ctx context.Context, chatID, text string) error {
 	return c.call(ctx, "sendMessage", v, nil)
 }
 
-type update struct {
+type rawUpdate struct {
 	UpdateID int64 `json:"update_id"`
 	Message  *struct {
 		Text string `json:"text"`
@@ -107,50 +107,87 @@ type update struct {
 	} `json:"message"`
 }
 
+// Update is one incoming message, flattened to what NUSSync needs.
+type Update struct {
+	ID     int64  // update_id
+	ChatID string // decimal chat id, "" when the update carried no message
+	Text   string
+}
+
+// GetUpdates long-polls the Bot API. offset is the next update id to receive
+// (0 = whatever Telegram still has queued); timeoutSec is the server-side long
+// poll, which must stay below the HTTP client timeout (90s).
+//
+// Telegram allows exactly ONE getUpdates consumer per bot: a second concurrent
+// caller makes both of them lose updates at random. Everything in NUSSync goes
+// through notify.Bot, which owns the single poll loop; AwaitStart and
+// FindExistingChat below are only for the headless CLI, where no bot runs.
+func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSec int) ([]Update, error) {
+	v := url.Values{}
+	v.Set("timeout", strconv.Itoa(timeoutSec))
+	v.Set("allowed_updates", `["message"]`)
+	if offset != 0 {
+		v.Set("offset", strconv.FormatInt(offset, 10))
+	}
+	var ups []rawUpdate
+	if err := c.call(ctx, "getUpdates", v, &ups); err != nil {
+		return nil, err
+	}
+	out := make([]Update, 0, len(ups))
+	for _, u := range ups {
+		up := Update{ID: u.UpdateID}
+		if u.Message != nil {
+			up.Text = u.Message.Text
+			if u.Message.Chat.ID != 0 {
+				up.ChatID = strconv.FormatInt(u.Message.Chat.ID, 10)
+			}
+		}
+		out = append(out, up)
+	}
+	return out, nil
+}
+
 // AwaitStart long-polls getUpdates until someone sends /start to the bot, and
 // returns their chat id. It also matches a /start already sitting in the queue.
 // Returns an error if the timeout elapses first.
+//
+// Only for the headless CLI (--pair). In the GUI, notify.Bot is the single
+// getUpdates consumer and App.PairTelegram waits on it instead.
 func (c *Client) AwaitStart(ctx context.Context, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	notPaired := fmt.Errorf("telegram: no /start received (send /start to @%s)", BotUsername)
 	var offset int64
 	deadline := time.Now().Add(timeout)
 	for {
 		if err := ctx.Err(); err != nil {
-			return "", fmt.Errorf("telegram: no /start received (send /start to @%s)", BotUsername)
+			return "", notPaired
 		}
 		remaining := int(time.Until(deadline).Seconds())
 		if remaining < 1 {
-			return "", fmt.Errorf("telegram: no /start received (send /start to @%s)", BotUsername)
+			return "", notPaired
 		}
 		if remaining > 25 {
 			remaining = 25
 		}
 
-		v := url.Values{}
-		v.Set("timeout", strconv.Itoa(remaining))
-		v.Set("allowed_updates", `["message"]`)
-		if offset != 0 {
-			v.Set("offset", strconv.FormatInt(offset, 10))
-		}
-
-		var ups []update
-		if err := c.call(ctx, "getUpdates", v, &ups); err != nil {
+		ups, err := c.GetUpdates(ctx, offset, remaining)
+		if err != nil {
 			if ctx.Err() != nil {
-				return "", fmt.Errorf("telegram: no /start received (send /start to @%s)", BotUsername)
+				return "", notPaired
 			}
 			return "", err
 		}
 		for _, u := range ups {
-			if u.UpdateID >= offset {
-				offset = u.UpdateID + 1
+			if u.ID >= offset {
+				offset = u.ID + 1
 			}
-			if u.Message == nil {
+			if u.ChatID == "" {
 				continue
 			}
-			if strings.HasPrefix(strings.TrimSpace(u.Message.Text), "/start") {
-				return strconv.FormatInt(u.Message.Chat.ID, 10), nil
+			if strings.HasPrefix(strings.TrimSpace(u.Text), "/start") {
+				return u.ChatID, nil
 			}
 		}
 	}
@@ -159,16 +196,13 @@ func (c *Client) AwaitStart(ctx context.Context, timeout time.Duration) (string,
 // FindExistingChat does a single non-blocking getUpdates poll looking for a
 // /start (or any message) already in the queue. Returns "" if none.
 func (c *Client) FindExistingChat(ctx context.Context) (string, error) {
-	v := url.Values{}
-	v.Set("timeout", "0")
-	v.Set("allowed_updates", `["message"]`)
-	var ups []update
-	if err := c.call(ctx, "getUpdates", v, &ups); err != nil {
+	ups, err := c.GetUpdates(ctx, 0, 0)
+	if err != nil {
 		return "", err
 	}
 	for i := len(ups) - 1; i >= 0; i-- {
-		if ups[i].Message != nil && ups[i].Message.Chat.ID != 0 {
-			return strconv.FormatInt(ups[i].Message.Chat.ID, 10), nil
+		if ups[i].ChatID != "" {
+			return ups[i].ChatID, nil
 		}
 	}
 	return "", nil

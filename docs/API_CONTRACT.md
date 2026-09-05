@@ -19,7 +19,10 @@ type FileNode struct {
     Source string /*"files"|"modules"|"pages"*/; Module string /*module title, or
       for "pages" the linking context: "<Module> / <Page>", "Pages / <Page>",
       "Assignments / <name>", "Announcements / <title>"; "" when unknown*/
-    Synced bool /*downloaded locally*/; Children []FileNode /*for dirs*/
+    Synced bool /*downloaded locally*/
+    IsNew bool /*changed after the feed was last marked seen — badge it;
+      see docs/CONTRACT_FEATURES.md*/
+    Children []FileNode /*for dirs*/
 }
 type SearchHit struct { File FileNode; CourseCode string; Snippet string; Score float64 }
 // Snippet marks matched terms with literal <b>…</b> (SQLite FTS5 snippet()).
@@ -29,19 +32,31 @@ type Deadline struct {
     ID int; CourseID int; CourseCode string; Title string
     Type string /*"assignment"|"quiz"|"discussion"*/
     DueAt string /*RFC3339*/; Submitted bool; URL string; PointsPossible float64
+    // Detail fields: zero-valued from GetDeadlines, filled by
+    // GetDeadlineDetail(id). See docs/CONTRACT_FEATURES.md.
+    Description string /*raw Canvas HTML — the FRONTEND must sanitize it*/
+    SubmissionTypes []string; Attachments []FileNode
+    Score float64; Graded bool; Stats *ScoreStats /*null unless disclosed*/
 }
+type ScoreStats struct { Mean, Min, Max, Median float64; Count int }
 type Announcement struct {
     ID int; CourseCode string; Title string; PostedAt string
     HTML string; Text string /*plain*/; URL string; Read bool
 }
-type Grade struct { CourseCode string; Title string; Score float64; Possible float64; GradedAt string; URL string }
+type Grade struct {
+    CourseCode string; Title string; Score float64; Possible float64
+    GradedAt string; URL string
+    Mean float64 /*class mean, 0 when never cached by GetDeadlineDetail*/
+}
 type Settings struct {
     CanvasURL string; CanvasToken string; SyncDir string
     TelegramToken string; TelegramChatID string
     ReminderLadder []string /*Go durations e.g. ["72h","48h","24h","3h","1h"]*/
     MaxFileMB int /*skip larger; 0 = no limit*/; SkipExts []string /*[".mp4"]*/
     SyncIntervalMin int; NotifyAnnouncements bool; NotifyGrades bool
+    NotifyDesktop bool /*Windows toast after a sync brings new files; default true*/
     LaunchAtLogin bool; Theme string /*"system"|"light"|"dark"*/
+    Hotkey string /*global show/hide, default "ctrl+shift+n"; "" disables*/
 }
 type SyncStatus struct {
     Running bool; Phase string /*"idle"|"listing"|"downloading"|"indexing"|"error"*/
@@ -80,6 +95,9 @@ SendTestTelegram() error
 ChooseSyncDir() (string, error)                      // native folder dialog; "" if cancelled
 GetStats() (Stats, error)
 ```
+
+Feature bindings added later (what's-new feed, assignment detail, window
+control) live in `docs/CONTRACT_FEATURES.md`.
 
 ## Events (EventsEmit from Go)
 - `sync:status` payload SyncStatus (throttled ~4/s)

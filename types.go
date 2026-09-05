@@ -28,7 +28,31 @@ type FileNode struct {
 	Source     string // "files" | "modules" | "pages"
 	Module     string // module title or ""
 	Synced     bool   // downloaded locally
+	IsNew      bool   // changed after the feed was last marked seen
 	Children   []FileNode
+}
+
+// FeedItem is one entry of the what's-new feed.
+type FeedItem struct {
+	ID         int // canvas file id
+	CourseID   int
+	CourseCode string
+	Name       string
+	Path       string // absolute local path
+	RelPath    string
+	Size       int64
+	ChangedAt  string // RFC3339
+	Kind       string // "new" | "updated"
+	Module     string
+}
+
+// ScoreStats is the class-wide score summary of a graded assignment.
+type ScoreStats struct {
+	Mean   float64
+	Min    float64
+	Max    float64
+	Median float64
+	Count  int
 }
 
 // SearchHit is one full-text search result.
@@ -50,6 +74,14 @@ type Deadline struct {
 	Submitted      bool
 	URL            string
 	PointsPossible float64
+
+	// Only filled by GetDeadlineDetail; zero-valued from GetDeadlines.
+	Description     string      // raw Canvas HTML — the frontend sanitizes it
+	SubmissionTypes []string    // e.g. ["online_upload"]
+	Attachments     []FileNode  // files linked in Description that we synced
+	Score           float64     // the user's score, 0 when ungraded
+	Graded          bool        //
+	Stats           *ScoreStats // nil when Canvas discloses no statistics
 }
 
 // Announcement is a course announcement.
@@ -72,6 +104,7 @@ type Grade struct {
 	Possible   float64
 	GradedAt   string
 	URL        string
+	Mean       float64 // class mean if cached, else 0
 }
 
 // Settings is the user-editable configuration.
@@ -89,8 +122,10 @@ type Settings struct {
 	SyncIntervalMin     int
 	NotifyAnnouncements bool
 	NotifyGrades        bool
+	NotifyDesktop       bool // Windows toast after a sync brings new files
 	LaunchAtLogin       bool
 	Theme               string // "system" | "light" | "dark"
+	Hotkey              string // global show/hide, e.g. "ctrl+shift+n"; "" disables
 }
 
 // SyncStatus is the live state of the sync engine.

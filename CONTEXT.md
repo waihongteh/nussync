@@ -37,6 +37,29 @@ unsubmitted assignments/quizzes, plus announcements/grades notifications.
   the template's `new App()` bootstrap with Svelte 5's `mount()` and deleted the
   bundled Nunito font (system stack only, no external font fetch).
 
+## Frontend: sidebar pet (2026-09-05)
+- **Pet is 100% frontend.** `lib/pet.ts` derives a mood (happy/worried/panic/
+  busy/sleepy/proud) from the existing `deadlines` + `syncStatus` stores plus an
+  idle timer; `components/Pet.svelte` is inline SVG animated with CSS only (no
+  assets, no library). Deliberately no Go changes — progression lives in
+  localStorage (`nussync.pet` = xp/level, `nussync.pet.prefs` = enabled/name),
+  so the Settings contract stays exactly as `docs/API_CONTRACT.md` defines it.
+- XP: +1 per new file (Stats.Files diff), +25 per deadline seen flipping to
+  submitted, +5 for the first open of each day. The "submitted" set and the file
+  count are *seeded without awarding* on first observation, otherwise a fresh
+  install would instantly pay out for pre-existing state.
+- Accessories unlock at Lv 3/5/8 (bow/glasses/crown); size caps at +16% (Lv 5).
+
+## Theme (2026-09-05)
+- `initTheme()` is now idempotent and is called from `main.ts` **before**
+  `mount()` so `data-theme` is on `<html>` pre-paint (no white flash in dark).
+- `loadSettings` no longer overwrites the theme when the machine already has an
+  explicit `nussync.theme` in localStorage (`hasLocalTheme`, captured before the
+  store subscription writes the key back). Previously the backend default
+  (`system`) stomped whatever the user had just picked, on every load.
+- The Settings theme `<select>` binds to the `theme` store, not `draft.Theme`,
+  so it always shows what the window is actually rendering.
+
 ## Backend decisions (2026-09-05)
 - **Contract types live in package `main`** (`types.go`), not a shared package,
   so Wails binding generation emits them under the `main` namespace exactly as
@@ -139,6 +162,10 @@ to cwd, which only worked when run from the repo.
       0 errors) both clean.
 
 ## Verified backend runs (2026-09-05)
+- After the feature batch: `go build ./...`, `go vet ./...`, `go test ./...`
+  clean; `--check` still lists 5 deadlines (NST2030 Essay Fri 11 Sep) and
+  `--sync` ran all 14 courses in 48s, 0 downloads, 0 errors, library unchanged
+  at 123 files / 482.4 MB — so the two additive columns cost no re-downloads.
 - `go build ./...`, `go vet ./...`, `go test ./...` all clean.
 - `go run . --check`: 5 deadlines, incl. NST2030 Essay due Fri 11 Sep 23:59.
 - `go run . --sync`: 100 files / 467 MB across 14 courses in 1m33s, **zero**
@@ -191,12 +218,65 @@ to cwd, which only worked when run from the repo.
   announcement images. Library 100 -> 123 files. Second run downloaded 0 and
   ran ~17s faster thanks to the page cache.
 
+## Feature batch (2026-09-05 night, backend)
+Contract for the new bindings: **`docs/API_CONTRACT.md` stays the base contract;
+`docs/CONTRACT_FEATURES.md` is the source of truth for everything below.**
+
+- **What's-new feed.** Additive `files.first_seen_at` / `files.last_changed_at`
+  (RFC3339, `store.addColumn`). `first_seen_at` is **write-once in SQL** (an
+  `ON CONFLICT ... CASE WHEN files.first_seen_at=''` clause) and
+  `last_changed_at` only moves when the caller supplies one — so the engine's
+  "unchanged, just re-upsert" path passes `""` and preserves both stamps
+  without needing a second query. Rows predating the feature keep empty stamps
+  and are deliberately never "new": verified by a `--sync` that downloaded 0
+  files and left all 123 rows alone. `feed_seen_at` kv drives `GetUnseenCount`
+  and `FileNode.IsNew`. Event `feed:updated` carries the count.
+- **Windows toast** via `git.sr.ht/~jackmordaunt/go-toast/v2` (already an
+  indirect Wails dep; builds on every OS because its non-Windows backend is a
+  no-op, so `notify_toast.go` needs no build tag). `toast.SetActivationCallback`
+  gives a real in-process click handler → `App.ShowWindow`, so no protocol
+  handler was needed. The icon must be an absolute path on disk (a toast renders
+  from a temp dir), so the embedded PNG is written once to
+  `%APPDATA%/NUSSync/appicon.png`. Setting `NotifyDesktop`, default true.
+- **Telegram two-way commands** in `internal/notify/bot.go` (loop) +
+  `commands.go` (pure formatters, table-tested). **Telegram hands each update to
+  exactly one `getUpdates` caller** — two pollers silently steal each other's
+  messages — so `notify.Bot` is the single consumer and `App.PairTelegram` now
+  waits on `Bot.AwaitPair` instead of long-polling itself. Headless CLI has no
+  bot, so `--pair` / `--notify-test` still use the direct
+  `AwaitStart`/`FindExistingChat` path; those were refactored onto a new
+  exported `telegram.Client.GetUpdates`. Command handling runs on its own
+  goroutine because `/sync` blocks for minutes.
+- **Assignment detail.** `GetDeadlineDetail(id)` fetches
+  `assignments/:id?include[]=score_statistics&include[]=submission` and caches it
+  in a new `assignment_cache` table for 6h; `grades` LEFT JOINs that table for
+  `Grade.Mean`. `Stats` is only set for graded assignments — Canvas returns
+  `score_statistics` without a `count` on this build, so `ScoreStats.Count` is
+  usually 0 and means "unknown". Attachments reuse `sync.FileIDsInHTML` over the
+  description; unsynced ids are dropped. **Description is returned raw** — the
+  frontend sanitizes.
+- **Tray** shows up to 3 disabled `CODE · Title · in 2d` rows. systray cannot
+  reorder a menu, so the three slots plus a separator are created up front and
+  `Hide()`n; `App.trayRefresh` is the hook the sync loop and a 15-min ticker call.
+- **Global hotkey** `hotkey.go` (portable parser + tests) / `hotkey_windows.go`
+  (`RegisterHotKey` with `MOD_NOREPEAT` on a `runtime.LockOSThread` goroutine
+  plus a `GetMessageW` loop). Passing hwnd=0 binds the hotkey to the *calling
+  thread*, which is why the thread must be pinned; teardown posts `WM_QUIT` to
+  the recorded thread id. Setting `Hotkey`, default `"ctrl+shift+n"`, `""`
+  disables. Wails v2 has no "is window visible", so `App.windowVisible` tracks
+  it.
+
 ## Dead ends
 - Sanitizing the whole cross-listed course code into one folder name.
 - FTS5 contentless tables (`content=''`) — `snippet()` cannot work on them.
 - `regexp.MustCompile` with a backreference (`</\1>`) — panics at init in RE2.
 - Guarding `FileIDsInHTML` with `strings.Contains(body, "/files/")` *before*
   unescaping `\/` — JSON-escaped bodies then extract nothing. Normalise first.
+- Running the Telegram pairing long poll alongside the command loop. Telegram
+  gives each update to one `getUpdates` caller only; both consumers then lose
+  messages at random. One loop, and pairing waits on it.
+- Back-filling `first_seen_at` for the existing library so the feed has content
+  on day one — every synced file would show as "new" forever after.
 
 ## Operational
 - Toolchain: Go 1.27 (`C:\Program Files\Go\bin`), wails CLI in `~/go/bin`,
@@ -210,11 +290,14 @@ to cwd, which only worked when run from the repo.
 - Canvas pet in sidebar: mood from deadlines/sync, click quips, level from
   synced files + on-time submissions, nameable, can be disabled.
 - Dark theme: already implemented (Settings > App > Theme); verify in real app.
-- Extra features approved 2026-09-05 ("useful, not redundant"): What's-new
+- [x] Extra features approved 2026-09-05 ("useful, not redundant"): What's-new
   feed + New badges + Windows toast; Telegram two-way commands (/due /new
   /files /sync); assignment detail panel + class score stats; tray next-3
-  deadlines; global hotkey Ctrl+Shift+N. Rejected: timetable (NUSMods),
-  submit-from-app, favourites, Panopto/Zoom recordings.
+  deadlines; global hotkey Ctrl+Shift+N. **Backend done** — see "Feature batch"
+  above and `docs/CONTRACT_FEATURES.md`; the UI for the feed, the New badges,
+  the assignment detail panel and the two new Settings toggles is still to
+  build. Rejected: timetable (NUSMods), submit-from-app, favourites,
+  Panopto/Zoom recordings.
 - Study/AI panel (approved 2026-09-05, ON-DEMAND ONLY, never auto): Overview,
   Quiz (MCQ+short, self-test mode), Ask (Q&A with page cites), Flashcards.
   NO API key (user has none). Backend shells out to the installed Claude
@@ -223,3 +306,9 @@ to cwd, which only worked when run from the repo.
   Claude Code reads the PDF itself. Model dropdown opus/sonnet. Show page
   count before run; stream/cancel; cache outputs in SQLite. Anthropic Go SDK
   rejected: needs API key.
+- Arcade (2026-09-05): Nibble Run (runner, hurdles = real deadlines) and
+  Lecture Merge (2048) built by frontend worker. Queued: Quiz Rush — arcade
+  game over the Study quiz bank (lives, shrinking timer, streak multiplier,
+  boss short-answer rounds, wrong -> flashcard pile, per-course best, XP).
+- Desktop shortcut created at %USERPROFILE%\Desktop\NUSSync.lnk -> build/bin/nussync.exe.
+  Taskbar pin cannot be automated on Win11; user pins manually.

@@ -28,6 +28,41 @@ type File struct {
 	ContentHash string
 	Indexed     bool
 	URL         string
+
+	// FirstSeenAt is stamped once, when the file is first downloaded.
+	// LastChangedAt is re-stamped on every re-download caused by a change.
+	// Both RFC3339, "" for rows predating the what's-new feed.
+	FirstSeenAt   string
+	LastChangedAt string
+}
+
+// FeedFile is one row of the what's-new feed: a file joined to its course code.
+type FeedFile struct {
+	File       File
+	CourseCode string
+	ChangedAt  string // RFC3339, last_changed_at
+	New        bool   // first_seen_at == last_changed_at
+}
+
+// ScoreStats is Canvas score_statistics for one assignment.
+type ScoreStats struct {
+	Mean   float64
+	Min    float64
+	Max    float64
+	Median float64
+	Count  int
+}
+
+// AssignmentDetail is the cached lazy detail of one assignment.
+type AssignmentDetail struct {
+	AssignmentID    int
+	CourseID        int
+	Description     string
+	SubmissionTypes []string
+	Score           float64
+	Graded          bool
+	Stats           *ScoreStats
+	FetchedAt       string // RFC3339
 }
 
 // Deadline is a persisted assignment/quiz deadline.
@@ -68,6 +103,8 @@ type Grade struct {
 	GradedAt     string
 	URL          string
 	Notified     bool
+	// Mean is the class mean from assignment_cache, 0 when not cached.
+	Mean float64
 }
 
 // Hit is one search result row.

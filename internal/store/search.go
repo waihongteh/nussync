@@ -66,6 +66,7 @@ func (s *Store) searchFTS(match string, courseID, limit int) ([]Hit, error) {
 	sqlText := `
 		SELECT f.id, f.course_id, f.name, f.rel_path, f.abs_path, f.size, f.modified_at,
 		       f.updated_at, f.source, f.module, f.synced, f.content_hash, f.indexed, f.url,
+		       COALESCE(f.first_seen_at,''), COALESCE(f.last_changed_at,''),
 		       COALESCE(c.code,''),
 		       snippet(files_fts, 1, '<b>', '</b>', '…', 12),
 		       bm25(files_fts)
@@ -96,7 +97,8 @@ func (s *Store) searchFTS(match string, courseID, limit int) ([]Hit, error) {
 		if err := rows.Scan(&h.File.ID, &h.File.CourseID, &h.File.Name, &h.File.RelPath,
 			&h.File.AbsPath, &h.File.Size, &h.File.ModifiedAt, &h.File.UpdatedAt,
 			&h.File.Source, &h.File.Module, &synced, &h.File.ContentHash, &indexed,
-			&h.File.URL, &h.CourseCode, &snip, &score); err != nil {
+			&h.File.URL, &h.File.FirstSeenAt, &h.File.LastChangedAt,
+			&h.CourseCode, &snip, &score); err != nil {
 			return nil, err
 		}
 		h.File.Synced = synced != 0
@@ -114,6 +116,7 @@ func (s *Store) searchLike(query string, courseID, limit int) ([]Hit, error) {
 	sqlText := `
 		SELECT f.id, f.course_id, f.name, f.rel_path, f.abs_path, f.size, f.modified_at,
 		       f.updated_at, f.source, f.module, f.synced, f.content_hash, f.indexed, f.url,
+		       COALESCE(f.first_seen_at,''), COALESCE(f.last_changed_at,''),
 		       COALESCE(c.code,'')
 		FROM files f LEFT JOIN courses c ON c.id = f.course_id
 		WHERE (LOWER(f.name) LIKE ? OR LOWER(f.rel_path) LIKE ?)`
@@ -138,7 +141,8 @@ func (s *Store) searchLike(query string, courseID, limit int) ([]Hit, error) {
 		if err := rows.Scan(&h.File.ID, &h.File.CourseID, &h.File.Name, &h.File.RelPath,
 			&h.File.AbsPath, &h.File.Size, &h.File.ModifiedAt, &h.File.UpdatedAt,
 			&h.File.Source, &h.File.Module, &synced, &h.File.ContentHash, &indexed,
-			&h.File.URL, &h.CourseCode); err != nil {
+			&h.File.URL, &h.File.FirstSeenAt, &h.File.LastChangedAt,
+			&h.CourseCode); err != nil {
 			return nil, err
 		}
 		h.File.Synced = synced != 0

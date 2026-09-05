@@ -121,6 +121,19 @@ type Submission struct {
 	Missing       bool       `json:"missing"`
 }
 
+// ScoreStatistics is Canvas's class-wide score summary for one assignment.
+// Canvas only returns it for graded assignments in courses with enough
+// submissions, and older Canvas builds omit "count" entirely (0 then).
+type ScoreStatistics struct {
+	Mean   float64 `json:"mean"`
+	Min    float64 `json:"min"`
+	Max    float64 `json:"max"`
+	Median float64 `json:"median"`
+	UpperQ float64 `json:"upper_q"`
+	LowerQ float64 `json:"lower_q"`
+	Count  int     `json:"count"`
+}
+
 // Assignment covers assignments and quizzes (submission_types online_quiz).
 type Assignment struct {
 	ID                      int         `json:"id"`
@@ -136,6 +149,10 @@ type Assignment struct {
 	Submission              *Submission `json:"submission"`
 	Published               bool        `json:"published"`
 	OmitFromFinalGrade      bool        `json:"omit_from_final_grade"`
+
+	// ScoreStatistics is only populated by AssignmentDetail
+	// (include[]=score_statistics); the list endpoint never returns it.
+	ScoreStatistics *ScoreStatistics `json:"score_statistics"`
 }
 
 // Kind maps an assignment to the contract's Deadline.Type.
