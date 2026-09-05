@@ -30,5 +30,14 @@ func TestContractSignatures(t *testing.T) {
 		_ func() error                           = a.SendTestTelegram
 		_ func() (string, error)                 = a.ChooseSyncDir
 		_ func() (Stats, error)                  = a.GetStats
+
+		// docs/CONTRACT_FEATURES.md
+		_ func(int) ([]FeedItem, error) = a.GetWhatsNew
+		_ func() error                  = a.MarkFeedSeen
+		_ func() (int, error)           = a.GetUnseenCount
+		_ func(int) (Deadline, error)   = a.GetDeadlineDetail
+		_ func()                        = a.ShowWindow
+		_ func()                        = a.HideWindow
+		_ func()                        = a.ToggleWindow
 	)
 }

@@ -25,8 +25,12 @@ type Settings struct {
 	SyncIntervalMin     int
 	NotifyAnnouncements bool
 	NotifyGrades        bool
+	NotifyDesktop       bool
 	LaunchAtLogin       bool
 	Theme               string
+	// Hotkey is a global show/hide shortcut, e.g. "ctrl+shift+n". Empty
+	// disables the hotkey entirely.
+	Hotkey string
 }
 
 // Defaults returns the baseline settings used on first run.
@@ -41,7 +45,9 @@ func Defaults() Settings {
 		SyncIntervalMin:     30,
 		NotifyAnnouncements: true,
 		NotifyGrades:        true,
+		NotifyDesktop:       true,
 		Theme:               "system",
+		Hotkey:              "ctrl+shift+n",
 	}
 }
 
@@ -152,6 +158,10 @@ func normalize(s *Settings) {
 	if s.Theme == "" {
 		s.Theme = d.Theme
 	}
+	// Hotkey is deliberately NOT defaulted here: "" means "disabled", and a
+	// config.json missing the key keeps the default because Load() unmarshals
+	// on top of Defaults().
+	s.Hotkey = strings.ToLower(strings.TrimSpace(s.Hotkey))
 	for i, e := range s.SkipExts {
 		e = strings.ToLower(strings.TrimSpace(e))
 		if e != "" && !strings.HasPrefix(e, ".") {
