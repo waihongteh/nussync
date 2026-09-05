@@ -113,6 +113,9 @@ func (a *App) startup(ctx context.Context) {
 	a.sched = notify.NewScheduler(a.st, a.telegram, cfg)
 	a.sched.Start(ctx)
 	a.studyInit()
+	if err := a.papersInit(); err != nil {
+		log.Printf("nussync: papers: %v", err)
+	}
 
 	// One getUpdates consumer for the whole process; PairTelegram waits on it.
 	a.bot = notify.NewBot(a.st, a.telegram, cfg)
@@ -144,6 +147,9 @@ func (a *App) shutdown(context.Context) {
 	}
 	if a.bot != nil {
 		a.bot.Stop()
+	}
+	if b := paperBot(); b != nil {
+		b.Stop()
 	}
 	a.stopHotkey()
 	a.stopSyncTimer()
@@ -183,6 +189,11 @@ func (a *App) GetCourses() ([]Course, error) {
 	}
 	out := make([]Course, 0, len(rows))
 	for _, r := range rows {
+		// The synthetic "Papers" course (id -1) only exists to give downloaded
+		// paper PDFs a files row; hide it until it actually owns some.
+		if r.ID < 0 && r.FileCount == 0 {
+			continue
+		}
 		out = append(out, toCourse(r))
 	}
 	return out, nil
@@ -792,6 +803,7 @@ func (a *App) SaveSettings(s Settings) error {
 	if a.bot != nil {
 		a.bot.SetConfig(saved, tg)
 	}
+	a.papersApplySettings(saved)
 	a.applyLaunchAtLogin(saved.LaunchAtLogin)
 	if saved.Hotkey != prevHotkey {
 		// Unregister the old combination before claiming the new one.

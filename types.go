@@ -126,6 +126,15 @@ type Settings struct {
 	LaunchAtLogin       bool
 	Theme               string // "system" | "light" | "dark"
 	Hotkey              string // global show/hide, e.g. "ctrl+shift+n"; "" disables
+
+	// Papers (docs/CONTRACT_PAPERS.md). The paper tracker runs on a SECOND
+	// Telegram bot with its own token, chat id and pairing.
+	PaperTelegramToken  string
+	PaperTelegramChatID string
+	PaperKeywords       []string // digest keyword filter
+	PaperCategories     []string // arXiv categories, e.g. ["cs.CL","cs.LG"]
+	PaperDigestHour     int      // 0-23 local time, default 9
+	NotifyPapers        bool
 }
 
 // SyncStatus is the live state of the sync engine.

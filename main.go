@@ -30,13 +30,16 @@ Usage:
   nussync --check         print upcoming deadlines and exit
   nussync --pair          wait for /start on Telegram and save the chat id
   nussync --notify-test   send a Telegram test message
+  nussync --papers-test "<query>" [--digest-send]
+                          search arXiv + Semantic Scholar, build today's
+                          digest and download one PDF
 `
 
 func main() {
 	// CLI modes run headless and exit; useful for testing without the GUI.
 	for _, arg := range os.Args[1:] {
 		switch arg {
-		case "--sync", "--check", "--notify-test", "--pair", "--study-test":
+		case "--sync", "--check", "--notify-test", "--pair", "--study-test", "--papers-test":
 			os.Exit(runCLI(arg))
 		case "-h", "--help":
 			fmt.Print(cliHelp)

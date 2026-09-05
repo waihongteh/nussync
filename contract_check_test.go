@@ -39,5 +39,32 @@ func TestContractSignatures(t *testing.T) {
 		_ func()                        = a.ShowWindow
 		_ func()                        = a.HideWindow
 		_ func()                        = a.ToggleWindow
+
+		// docs/CONTRACT_PAPERS.md
+		_ func(string, string, int) (PaperSearchResult, error) = a.SearchPapers
+		_ func(string) (Paper, error)                          = a.GetPaper
+		_ func(Paper) (LibraryPaper, error)                    = a.AddPaperToLibrary
+		_ func(string) error                                   = a.RemovePaperFromLibrary
+		_ func(string) ([]LibraryPaper, error)                 = a.GetLibrary
+		_ func(LibraryPaper) (LibraryPaper, error)             = a.UpdateLibraryPaper
+		_ func(string) (LibraryPaper, error)                   = a.DownloadPaperPDF
+		_ func(string, int) ([]CitationLink, error)            = a.GetCitations
+		_ func(string, int) ([]CitationLink, error)            = a.GetReferences
+		_ func(int) ([]Paper, error)                           = a.GetRecommendations
+		_ func(string) (PaperDigest, error)                    = a.GetPaperDigest
+		_ func() error                                         = a.SendPaperDigestNow
+		_ func([]string) (string, error)                       = a.ExportBibTeX
+		_ func(string) error                                   = a.OpenScholar
+		_ func(string, string) (string, error)                 = a.StartPaperSummary
+		_ func(string) (PaperSummary, error)                   = a.GetPaperSummary
+		_ func() TelegramStatus                                = a.GetPaperTelegramStatus
+		_ func() (string, error)                               = a.PairPaperTelegram
+		_ func() error                                         = a.SendPaperTestTelegram
+
+		_ func(int, string, string) (ChatSession, error) = a.StartChat
+		_ func(string, string) (string, error)           = a.SendChat
+		_ func(int, string) ([]ChatSession, error)       = a.GetChats
+		_ func(string) ([]ChatMessage, error)            = a.GetChatMessages
+		_ func(string) error                             = a.DeleteChat
 	)
 }

@@ -57,6 +57,16 @@ type Settings struct {
     NotifyDesktop bool /*Windows toast after a sync brings new files; default true*/
     LaunchAtLogin bool; Theme string /*"system"|"light"|"dark"*/
     Hotkey string /*global show/hide, default "ctrl+shift+n"; "" disables*/
+    // Papers (docs/CONTRACT_PAPERS.md). The paper tracker runs on a SECOND
+    // Telegram bot with its own token, chat id and pairing; the token is
+    // imported from .env key PAPER_TRACKER_TELEGRAM_TOKEN when empty.
+    PaperTelegramToken string; PaperTelegramChatID string
+    PaperKeywords []string   /*digest filter; default: machine unlearning, LLM
+      unlearning, knowledge editing, model editing, knowledge unlearning,
+      memorization*/
+    PaperCategories []string /*arXiv categories, default ["cs.CL","cs.LG","cs.AI"]*/
+    PaperDigestHour int      /*0-23 local time, default 9*/
+    NotifyPapers bool        /*default true*/
 }
 type SyncStatus struct {
     Running bool; Phase string /*"idle"|"listing"|"downloading"|"indexing"|"error"*/
@@ -97,7 +107,9 @@ GetStats() (Stats, error)
 ```
 
 Feature bindings added later (what's-new feed, assignment detail, window
-control) live in `docs/CONTRACT_FEATURES.md`.
+control) live in `docs/CONTRACT_FEATURES.md`. Study/AI lives in
+`docs/CONTRACT_STUDY.md`; the Papers tracker, paper summaries and the in-app
+Claude chat live in `docs/CONTRACT_PAPERS.md`.
 
 ## Events (EventsEmit from Go)
 - `sync:status` payload SyncStatus (throttled ~4/s)

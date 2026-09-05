@@ -390,6 +390,74 @@ Decisions:
 
 `npm run check` 0 errors, `npm run build` clean, console clean in the harness.
 
+## Papers backend (2026-09-06)
+Contract: `docs/CONTRACT_PAPERS.md`. Code: `internal/papers/**`, `app_papers.go`
+(`papersInit()` via `sync.Once`, called from `startup` right after
+`studyInit()`), `types_papers.go`, `internal/store/papers.go`
+(`MigratePapers`), `internal/notify/paperbot.go`, `internal/study/chat.go`,
+`app_chat.go`, `cli_papers.go`.
+
+- **arXiv**: `https://export.arxiv.org/api/query` (the `http://` form answers
+  301). Atom parsed with `encoding/xml`; Go matches namespaced elements
+  (`opensearch:totalResults`, `arxiv:primary_category`, `arxiv:doi`,
+  `arxiv:journal_ref`) by local name, so no namespace tags are needed. One
+  process-wide limiter enforces >= 3 s between calls, and PDF downloads from
+  arxiv.org go through it too. User-Agent `NUSSync/1.0`. Verified 2026-09-06:
+  466 hits for "LLM unlearning" in 715 ms.
+- **Semantic Scholar**: no key, and the public tier answered **429 on the very
+  first request** during testing — assume it is usually rate limited. 429/5xx
+  retries 3x with 1s/2s/4s backoff; failure is non-fatal for
+  `SearchPapers(..., "all", ...)` (arXiv-only results come back) and for the
+  digest (which then falls back to an arXiv keyword search, with the reason
+  line saying so). Every GET body is cached 24 h in `papers_cache`.
+- **Course -1 convention.** A downloaded paper needs a `files` row so Study,
+  FTS and chat work on it, so `store.EnsurePapersCourse()` creates one synthetic
+  course `id=-1, code="Papers", name="Research papers", enabled=0`, and each PDF
+  gets a negative `files.id` allocated from -1000 downwards
+  (`store.NextPaperFileID`). Canvas ids are always positive, so nothing
+  collides. The sync engine only iterates courses Canvas listed, so -1 is never
+  synced or folder-migrated; `App.GetCourses` additionally hides it while its
+  file count is 0. Files land in `<SyncDir>/Papers/<year> - <surname> -
+  <title>.pdf` and are text-extracted into `files_fts` immediately.
+- **Chat resume**: `claude -p ... -r/--resume <session id>` IS accepted by CLI
+  2.1.251 (`claude -p --help` lists `-r, --resume [value]`), so multi-turn is
+  the stored `session_id` from the first result line. `study.RunChat` duplicates
+  the ~50 lines of process plumbing from `Run` rather than editing `claude.go`,
+  because it needs a per-assistant-block text callback. **The CLI streams whole
+  assistant messages, not token deltas**, so one `chat:delta` event = one
+  assistant text block. If a resume fails (session gone from disk), the turn is
+  retried once from scratch with the transcript replayed in the prompt
+  (`study.ReplayPrompt`).
+- Summary and chat reuse the Study single-slot job queue (kinds
+  `paper_summary`, `chat`), so they never run two `claude` processes at once.
+  `StartPaperSummary` downloads the PDF inside the job when LocalPath is empty.
+- **Paper Telegram bot is a SECOND bot**: `@paper_trackerrr_bot` (token in
+  `.env` as `PAPER_TRACKER_TELEGRAM_TOKEN`, imported into
+  `Settings.PaperTelegramToken` on first run / whenever empty). It has its own
+  poll loop (`notify.PaperBot`), its own chat id, its own pairing
+  (`PairPaperTelegram`) and its own once-a-minute digest ticker at
+  `PaperDigestHour` (kv `papers_last_digest`, stamped *before* sending so a
+  failure does not retry every minute). Commands `/paper`, `/save <n>`,
+  `/reading`, `/help`, `/start`; all paper logic reaches notify through hook
+  funcs so the package stays a transport. **Not paired** as of 2026-09-06 —
+  nobody has sent /start to it.
+- Google Scholar: `OpenScholar` builds a search URL and hands it to the shell.
+  Never fetched, never parsed.
+
+### Verified runs (2026-09-06)
+- `go run . --papers-test "LLM unlearning"`: arXiv 5/5 with authors, years and
+  PDF links; S2 429 (non-fatal); digest of 8 papers, Telegram body 3636 bytes
+  (< 4000); downloaded 2506.13181 into `<SyncDir>\Papers\` as
+  `2025 - Spohn - Align-then-Unlearn_ ....pdf`, files row `course -1 (Papers)`,
+  462.5 KB, synced+indexed, 8 pages; BibTeX `@misc{spohn2025alignthenunlearn}`
+  with eprint/archivePrefix/primaryClass.
+- `--claude-test`: both the summary job and the chat job finish with
+  `error - Failed to authenticate: OAuth session expired and could not be
+  refreshed`, i.e. the known CLI auth problem surfaces cleanly in `Job.Error`
+  and the user message is still stored. Blocked on `claude auth login`.
+- `--digest-send`: refused, "the paper bot @paper_trackerrr_bot is NOT paired".
+- `go build ./... && go vet ./... && go test ./... && gofmt -l .` all clean.
+
 ## Dead ends
 - Sanitizing the whole cross-listed course code into one folder name.
 - Passing a multi-line `claude` prompt as an argv element on Windows (see above).
@@ -404,6 +472,10 @@ Decisions:
   messages at random. One loop, and pairing waits on it.
 - Back-filling `first_seen_at` for the existing library so the feed has content
   on day one — every synced file would show as "new" forever after.
+- `http://export.arxiv.org/api/query` — 301s; use https directly.
+- Relying on Semantic Scholar for anything load-bearing: the keyless tier 429s
+  constantly. It is enrichment only.
+- Scraping Google Scholar (no API, against its terms) — button only.
 
 ## Operational
 - Toolchain: Go 1.27 (`C:\Program Files\Go\bin`), wails CLI in `~/go/bin`,
@@ -454,6 +526,8 @@ Decisions:
 - NOT yet integration-tested against real backend: What's new, deadline
   detail, Study, Quiz Rush, settings additions (only mock-verified).
 - Study blocked until user runs `claude auth login`.
-- Queued for 02:38 wake (session cron): Papers feature per docs/PAPERS_SPEC.md
-  (backend + frontend + separate paper bot + summary + chat panel), then
-  integration pass, build, push.
+- Papers **backend** built 2026-09-06 (see "Papers backend" above): search,
+  library, download+index, digest, BibTeX, paper summary, in-app chat, second
+  Telegram bot. Frontend Papers view + chat panel is the frontend agent's half.
+  Outstanding: pair the paper bot (@paper_trackerrr_bot), run
+  `claude auth login` for summary/chat, then an integration pass and a build.

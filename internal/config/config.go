@@ -31,6 +31,16 @@ type Settings struct {
 	// Hotkey is a global show/hide shortcut, e.g. "ctrl+shift+n". Empty
 	// disables the hotkey entirely.
 	Hotkey string
+
+	// Papers feature (docs/CONTRACT_PAPERS.md). The paper tracker uses a
+	// SECOND Telegram bot, so it has its own token and chat id; the NUSSync
+	// bot keeps the course commands.
+	PaperTelegramToken  string
+	PaperTelegramChatID string
+	PaperKeywords       []string
+	PaperCategories     []string
+	PaperDigestHour     int
+	NotifyPapers        bool
 }
 
 // Defaults returns the baseline settings used on first run.
@@ -48,6 +58,13 @@ func Defaults() Settings {
 		NotifyDesktop:       true,
 		Theme:               "system",
 		Hotkey:              "ctrl+shift+n",
+		PaperKeywords: []string{
+			"machine unlearning", "LLM unlearning", "knowledge editing",
+			"model editing", "knowledge unlearning", "memorization",
+		},
+		PaperCategories: []string{"cs.CL", "cs.LG", "cs.AI"},
+		PaperDigestHour: 9,
+		NotifyPapers:    true,
 	}
 }
 
@@ -162,6 +179,15 @@ func normalize(s *Settings) {
 	// config.json missing the key keeps the default because Load() unmarshals
 	// on top of Defaults().
 	s.Hotkey = strings.ToLower(strings.TrimSpace(s.Hotkey))
+	if len(s.PaperKeywords) == 0 {
+		s.PaperKeywords = d.PaperKeywords
+	}
+	if len(s.PaperCategories) == 0 {
+		s.PaperCategories = d.PaperCategories
+	}
+	if s.PaperDigestHour < 0 || s.PaperDigestHour > 23 {
+		s.PaperDigestHour = d.PaperDigestHour
+	}
 	for i, e := range s.SkipExts {
 		e = strings.ToLower(strings.TrimSpace(e))
 		if e != "" && !strings.HasPrefix(e, ".") {
@@ -185,6 +211,10 @@ func applyEnv(s *Settings, env map[string]string) {
 	if v := env["TELEGRAM_CHAT_ID"]; v != "" && s.TelegramChatID == "" {
 		s.TelegramChatID = v
 	}
+	// The papers tracker is a separate bot with its own token.
+	if v := env["PAPER_TRACKER_TELEGRAM_TOKEN"]; v != "" && s.PaperTelegramToken == "" {
+		s.PaperTelegramToken = v
+	}
 }
 
 // ImportEnvInto fills any still-empty credentials from the process environment
@@ -192,7 +222,8 @@ func applyEnv(s *Settings, env map[string]string) {
 func ImportEnvInto(s *Settings) bool {
 	before := *s
 	env := readDotEnv(".env")
-	for _, k := range []string{"CANVAS_URL", "CANVAS_TOKEN", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"} {
+	for _, k := range []string{"CANVAS_URL", "CANVAS_TOKEN", "TELEGRAM_TOKEN",
+		"TELEGRAM_CHAT_ID", "PAPER_TRACKER_TELEGRAM_TOKEN"} {
 		if v := os.Getenv(k); v != "" {
 			if _, ok := env[k]; !ok {
 				env[k] = v
@@ -203,6 +234,7 @@ func ImportEnvInto(s *Settings) bool {
 	return before.CanvasToken != s.CanvasToken ||
 		before.TelegramToken != s.TelegramToken ||
 		before.TelegramChatID != s.TelegramChatID ||
+		before.PaperTelegramToken != s.PaperTelegramToken ||
 		before.CanvasURL != s.CanvasURL
 }
 

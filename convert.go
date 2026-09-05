@@ -133,6 +133,12 @@ func toSettings(c config.Settings) Settings {
 		LaunchAtLogin:       c.LaunchAtLogin,
 		Theme:               c.Theme,
 		Hotkey:              c.Hotkey,
+		PaperTelegramToken:  c.PaperTelegramToken,
+		PaperTelegramChatID: c.PaperTelegramChatID,
+		PaperKeywords:       c.PaperKeywords,
+		PaperCategories:     c.PaperCategories,
+		PaperDigestHour:     c.PaperDigestHour,
+		NotifyPapers:        c.NotifyPapers,
 	}
 }
 
@@ -153,6 +159,12 @@ func fromSettings(s Settings) config.Settings {
 		LaunchAtLogin:       s.LaunchAtLogin,
 		Theme:               s.Theme,
 		Hotkey:              s.Hotkey,
+		PaperTelegramToken:  s.PaperTelegramToken,
+		PaperTelegramChatID: s.PaperTelegramChatID,
+		PaperKeywords:       s.PaperKeywords,
+		PaperCategories:     s.PaperCategories,
+		PaperDigestHour:     s.PaperDigestHour,
+		NotifyPapers:        s.NotifyPapers,
 	}
 }
 
