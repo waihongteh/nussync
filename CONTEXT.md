@@ -1,6 +1,6 @@
 # NUSSync — decision log
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 ## Direction
 Desktop app for NUS Canvas (canvas.nus.edu.sg): auto-sync all course files
@@ -341,6 +341,55 @@ created lazily by `MigrateStudy`, **not** from `Store.migrate`).
   "hard" schedule further out than "good".
 - `NUSSYNC_CLAUDE_BIN` overrides binary discovery (testing only).
 
+## Frontend: feature + study batch (2026-09-06)
+
+Built by a frontend subagent under `frontend/` only; `App.svelte`, `Sidebar`,
+`CommandPalette`, `pet.ts`, `Pet.svelte`, `games/**` and `Arcade.svelte` were
+owned by another session at the time, so **the nav items, routes, palette
+commands and the Arcade card for Quiz Rush still need wiring** by whoever owns
+those files. Everything else is done.
+
+New views (self-contained, `src/lib/views/`):
+- `WhatsNew.svelte` — feed grouped day then course, new/updated chip, click
+  opens, right-click reveals, "Mark all seen", 3/7/14/30-day window.
+- `Study.svelte` — on-demand only. Left picker (PDFs first, page count fetched
+  lazily on select, multi-select), right tabs Overview/Quiz/Ask/Flashcards,
+  each showing cached results first. Jobs tracked via `study:job` /
+  `study:progress` with a progress line, elapsed seconds and Cancel.
+- `QuizRush.svelte` — arcade run over `GetQuizzes(0)`, 3 lives, timer 12s->5s
+  as the streak grows, x1..x5 multiplier, short-answer boss every 10th, redo
+  pile at the end, best per course in `nussync.arcade.rush`.
+- `_Preview.svelte` — dev-only harness. `main.ts` mounts it INSTEAD of App only
+  when `location.search` contains `preview=`; keep that guard. Use
+  `npm run dev` then `/?preview=1&view=study`.
+
+Edited: `Files.svelte` (New chip on `FileNode.IsNew`), `Home.svelte` ("new
+since last visit" line), `Deadlines.svelte` (right-side detail panel:
+sanitized description, submission types, score, class range bar with your
+score marked, attachments, Open in Canvas), `Grades.svelte` (class mean +
+"vs class" delta column), `Settings.svelte` (NotifyDesktop toggle, Hotkey
+field, Telegram command help card, Study status card + model select).
+
+Decisions:
+- `unseenCount` lives in `stores.ts`, refreshed on `feed:updated` and after
+  every sync — the nav badge reads that store.
+- `navigate()` is also reachable from decoupled components by dispatching
+  `new CustomEvent('nussync:navigate', {detail:{view:'study'}})` on window;
+  `wireEvents()` listens. Quiz Rush's empty state uses it.
+- Markdown from the model is rendered by `util.markdownToHTML` — escape-first,
+  then re-enable only headings/bold/italics/code/lists/quotes. No library, and
+  no path by which model output can inject HTML.
+- The study model preference is frontend-only, `localStorage`
+  `nussync.study.model`, read by both Settings and Study.
+- Quiz Rush calls the pet through `import * as pet` +
+  `(pet as any).addXP?.(n, 'rush')` so it never breaks if pet.ts changes.
+- `mock.ts` now fakes the whole study backend: a ~5s job with real progress
+  lines and cancel, a pre-seeded bank (3 quizzes / 15 questions), one cached
+  overview, 6 flashcards, deadline detail with score statistics, and a feed
+  whose `feed_seen_at` sits 2.5 days back so `IsNew` is non-trivial.
+
+`npm run check` 0 errors, `npm run build` clean, console clean in the harness.
+
 ## Dead ends
 - Sanitizing the whole cross-listed course code into one folder name.
 - Passing a multi-line `claude` prompt as an argv element on Windows (see above).
@@ -388,6 +437,9 @@ created lazily by `MigrateStudy`, **not** from `Store.migrate`).
   Lecture Merge (2048) built by frontend worker. Queued: Quiz Rush — arcade
   game over the Study quiz bank (lives, shrinking timer, streak multiplier,
   boss short-answer rounds, wrong -> flashcard pile, per-course best, XP).
+  **Built 2026-09-06** as `views/QuizRush.svelte`; needs an Arcade card to
+  reach it. Same for the What's-new and Study views — see the frontend batch
+  section above for the wiring that is still outstanding.
 - Desktop shortcut created at %USERPROFILE%\Desktop\NUSSync.lnk -> build/bin/nussync.exe.
   Taskbar pin cannot be automated on Win11; user pins manually.
 
