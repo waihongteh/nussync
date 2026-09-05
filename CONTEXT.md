@@ -371,3 +371,6 @@ created lazily by `MigrateStudy`, **not** from `Store.migrate`).
   boss short-answer rounds, wrong -> flashcard pile, per-course best, XP).
 - Desktop shortcut created at %USERPROFILE%\Desktop\NUSSync.lnk -> build/bin/nussync.exe.
   Taskbar pin cannot be automated on Win11; user pins manually.
+
+## Repo
+- GitHub: https://github.com/waihongteh/nussync (origin, branch main). Windows-only target; Mac/Linux port abandoned 2026-09-05 by user choice.
