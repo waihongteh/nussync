@@ -55,3 +55,30 @@ Settings section for keywords/categories/hour/toggle. Nav item "Papers".
   /help go through THIS bot only; the NUSSync bot keeps course commands.
 - Settings UI: Papers section shows the paper bot status + Pair + Send test.
 - Ask user for the bot's @username when awake (unknown yet); not needed for API.
+
+## Added 2026-09-06 00:00 — Claude features (ON-DEMAND ONLY, via Claude Code CLI like Study)
+### Paper key points
+- `StartPaperSummary(paperID string, model string) (jobID, error)`,
+  `GetPaperSummary(paperID) (PaperSummary, error)`; PaperSummary{PaperID;
+  Markdown; CreatedAt; Model}. Prompt sections: Contribution / Method / Key
+  results (numbers) / Limitations / Relevance to LLM unlearning & knowledge
+  editing / One-line takeaway / Related work worth reading. Reuse
+  internal/study runner + job queue + study:job events. Button "Summarise"
+  on the library paper card; shown inline when cached.
+### In-app Claude chat (both Canvas files and papers)
+- Backend `internal/study/chat.go` + `app_chat.go`: `StartChat(fileID int,
+  paperID string, model string) (ChatSession, error)`, `SendChat(sessionID,
+  message) (jobID, error)` streaming reply via `chat:delta` {SessionID, Text}
+  and `chat:done`; uses `claude -p --resume <claude session id>` for
+  multi-turn (store the claude session_id from the first result JSON);
+  `GetChats(fileID, paperID) ([]ChatSession)`, `GetChatMessages(sessionID)`,
+  `DeleteChat(sessionID)`. Tables study_chats / study_chat_messages. First
+  message system framing: "Context file: <abs path>. Read it with the Read
+  tool before answering. Cite pages." Model dropdown, cancel.
+- Frontend: right-side slide-in panel toggled by a chat icon in the top bar
+  and Ctrl+J, available in every view; context chip shows the currently
+  selected/open file (Files selection, Study selection, Papers selection —
+  keep a `currentContext` store {fileID, paperID, name}); message list with
+  markdown rendering (reuse Study's mini markdown), streaming text, input
+  with Enter to send / Shift+Enter newline, Clear, model select, session
+  list per file. Empty context -> chat still works but without file.
