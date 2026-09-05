@@ -529,7 +529,7 @@ let settings: Settings = {
   Theme: 'system',
 };
 
-let telegram: TelegramStatus = { Configured: false, ChatID: '', BotName: 'nuscanvassync_bot' };
+let telegram: TelegramStatus = { Configured: false, ChatID: '', BotName: '@nuscanvassync_bot' };
 
 // ---------------------------------------------------------------- sync sim
 
@@ -744,7 +744,7 @@ export const mockAPI: AppAPI = {
 
   PairTelegram: async () => {
     await delay(null, 2600);
-    telegram = { Configured: true, ChatID: '584219307', BotName: 'nuscanvassync_bot' };
+    telegram = { Configured: true, ChatID: '584219307', BotName: '@nuscanvassync_bot' };
     settings.TelegramChatID = telegram.ChatID;
     return telegram.ChatID;
   },

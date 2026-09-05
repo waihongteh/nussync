@@ -42,6 +42,11 @@ type Result struct {
 	BytesDownloaded int64
 	CoursesSynced   int
 	Errors          []string
+
+	// NewAnnouncementIDs are announcements first seen during this run. The UI
+	// toasts on these; the Telegram scheduler has its own `notified` flag, so
+	// an unpaired bot must not make every sync re-announce the whole backlog.
+	NewAnnouncementIDs []int
 }
 
 // Engine performs one sync at a time.
@@ -53,6 +58,10 @@ type Engine struct {
 
 	// Workers is the download concurrency (default 4).
 	Workers int
+
+	// newAnns collects announcement IDs inserted by this run. Only written
+	// from the sequential metadata loop.
+	newAnns []int
 }
 
 // New builds an engine.
@@ -105,6 +114,13 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		}
 	}
 
+	// Course codes were just refreshed; move any library still on the legacy
+	// "every cross-listed code joined by _" folder naming before listing files,
+	// so nothing is re-downloaded.
+	if _, err := MigrateCourseFolders(e.Store, e.Settings.SyncDir); err != nil {
+		res.Errors = append(res.Errors, "migrate folders: "+err.Error())
+	}
+
 	enabled, err := e.Store.EnabledCourses()
 	if err != nil {
 		return res, err
@@ -133,6 +149,7 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	}
 
 	// Metadata refresh.
+	e.newAnns = nil
 	for _, c := range enabled {
 		if !active[c.ID] {
 			continue
@@ -145,6 +162,8 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 			res.Errors = append(res.Errors, fmt.Sprintf("%s meta: %v", c.Code, err))
 		}
 	}
+
+	res.NewAnnouncementIDs = e.newAnns
 
 	e.report(Progress{Phase: "indexing", BytesDownloaded: res.BytesDownloaded})
 	if err := e.indexNew(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -447,6 +466,10 @@ func derefTime(t *time.Time) time.Time {
 
 // CourseCode derives a short course code, preferring Canvas's course_code but
 // trimming the NUS section suffix (e.g. "CS4246 [2610]" -> "CS4246").
+//
+// Cross-listed modules keep every code, separated by "/", exactly as Canvas
+// reports them ("CS4246/CS5446"). That is the display/DB form; the on-disk
+// folder name comes from CourseFolder, which keeps only the first segment.
 func CourseCode(c canvas.Course) string {
 	code := strings.TrimSpace(c.CourseCode)
 	if code == "" {
@@ -465,7 +488,12 @@ func CourseCode(c canvas.Course) string {
 			code = f[0]
 		}
 	}
-	return SanitizeSegment(code)
+	// Sanitize per segment so "/" survives as the cross-listing separator.
+	parts := strings.Split(code, "/")
+	for i, p := range parts {
+		parts[i] = SanitizeSegment(p)
+	}
+	return strings.Join(parts, "/")
 }
 
 func hasDigit(s string) bool {

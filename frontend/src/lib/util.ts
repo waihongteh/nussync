@@ -52,6 +52,29 @@ export function fmtBytes(bytes: number | null | undefined): string {
   return `${v.toFixed(dp)} ${units[i]}`;
 }
 
+/**
+ * Trim float noise from a points value: 4.666666666666667 -> "4.67", 6 -> "6".
+ * Canvas returns raw float scores, so rounding must happen at render time.
+ */
+export function fmtScore(n: number | null | undefined): string {
+  if (n === null || n === undefined || !isFinite(n)) return '—';
+  const rounded = Math.round(n * 100) / 100;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/0$/, '');
+}
+
+/**
+ * Render an FTS5 snippet (which marks matches with literal `<b>`…`</b>`) as
+ * escaped HTML in which only those markers stay live. Everything else in the
+ * snippet is extracted PDF text and must not be interpreted as markup.
+ */
+export function snippetHTML(snippet: string): string {
+  const escaped = snippet
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return escaped.replace(/&lt;b&gt;/g, '<mark>').replace(/&lt;\/b&gt;/g, '</mark>');
+}
+
 /** Absolute datetime, e.g. "Mon 12 May, 23:59". */
 export function fmtDateTime(input: string | null | undefined): string {
   if (!input) return '—';

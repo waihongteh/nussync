@@ -111,10 +111,29 @@ func RelPathFor(source, folderPath, module, name string) string {
 	return fp + "/" + name
 }
 
-// AbsPathFor joins the sync root, course code and relative path into a native
+// CourseFolder is the on-disk directory name for a course code. Cross-listed
+// codes such as "TR3202S/TR3202T/ETP3201S/ETP3201T/ETP3206L/ETP3201I" would
+// otherwise become an unusable 50-character folder, so only the first segment
+// is used. The full code is still what the DB and UI show.
+func CourseFolder(courseCode string) string {
+	code := strings.ReplaceAll(courseCode, "\\", "/")
+	if i := strings.Index(code, "/"); i > 0 {
+		code = code[:i]
+	}
+	return SanitizeSegment(code)
+}
+
+// LegacyCourseFolder is the pre-2026-09 folder name, in which "/" was replaced
+// by "_" and every code was kept. Used only to migrate existing libraries.
+func LegacyCourseFolder(courseCode string) string {
+	return SanitizeSegment(strings.ReplaceAll(
+		strings.ReplaceAll(courseCode, "\\", "/"), "/", "_"))
+}
+
+// AbsPathFor joins the sync root, course folder and relative path into a native
 // absolute path.
 func AbsPathFor(syncDir, courseCode, rel string) string {
-	segs := append([]string{syncDir, SanitizeSegment(courseCode)},
+	segs := append([]string{syncDir, CourseFolder(courseCode)},
 		strings.Split(SanitizeRel(rel), "/")...)
 	return filepath.Join(segs...)
 }

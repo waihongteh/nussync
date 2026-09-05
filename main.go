@@ -19,6 +19,9 @@ var assets embed.FS
 //go:embed build/appicon.png
 var appIconPNG []byte
 
+//go:embed build/windows/icon.ico
+var appIconICO []byte
+
 const cliHelp = `NUSSync - Canvas LMS desktop sync
 
 Usage:

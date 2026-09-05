@@ -102,3 +102,21 @@ func TestAbsPathFor(t *testing.T) {
 		t.Errorf("AbsPathFor = %q, want %q", got, want)
 	}
 }
+
+func TestCourseFolder(t *testing.T) {
+	cases := []struct{ code, folder, legacy string }{
+		{"MA3236", "MA3236", "MA3236"},
+		{"CS4246/CS5446", "CS4246", "CS4246_CS5446"},
+		{"TR3202S/TR3202T/ETP3201S/ETP3201T/ETP3206L/ETP3201I", "TR3202S",
+			"TR3202S_TR3202T_ETP3201S_ETP3201T_ETP3206L_ETP3201I"},
+		{"NOC_AY2425ST_AY2526S1", "NOC_AY2425ST_AY2526S1", "NOC_AY2425ST_AY2526S1"},
+	}
+	for _, c := range cases {
+		if got := CourseFolder(c.code); got != c.folder {
+			t.Errorf("CourseFolder(%q) = %q, want %q", c.code, got, c.folder)
+		}
+		if got := LegacyCourseFolder(c.code); got != c.legacy {
+			t.Errorf("LegacyCourseFolder(%q) = %q, want %q", c.code, got, c.legacy)
+		}
+	}
+}

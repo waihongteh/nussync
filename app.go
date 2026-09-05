@@ -172,28 +172,56 @@ func (a *App) SetCourseEnabled(id int, enabled bool) error {
 
 // -------------------------------------------------------------------- files
 
-// GetTree returns the nested file tree of one course.
+// GetTree returns the nested file tree of one course. courseID 0 returns every
+// course's tree, each wrapped in a top-level folder named after the course
+// code — the command palette calls GetTree(0) once to build its file index.
 func (a *App) GetTree(courseID int) ([]FileNode, error) {
 	if a.st == nil {
 		return nil, errors.New("not initialised")
-	}
-	files, err := a.st.FilesByCourse(courseID)
-	if err != nil {
-		return nil, err
 	}
 	courses, err := a.st.Courses()
 	if err != nil {
 		return nil, err
 	}
-	code := ""
-	for _, c := range courses {
-		if c.ID == courseID {
-			code = c.Code
-			break
+	syncDir := a.settings().SyncDir
+
+	if courseID != 0 {
+		files, err := a.st.FilesByCourse(courseID)
+		if err != nil {
+			return nil, err
 		}
+		code := ""
+		for _, c := range courses {
+			if c.ID == courseID {
+				code = c.Code
+				break
+			}
+		}
+		return BuildTree(courseID, filepath.Join(syncDir, sync.CourseFolder(code)), files), nil
 	}
-	root := filepath.Join(a.settings().SyncDir, code)
-	return BuildTree(courseID, root, files), nil
+
+	out := make([]FileNode, 0, len(courses))
+	for _, c := range courses {
+		files, err := a.st.FilesByCourse(c.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(files) == 0 {
+			continue
+		}
+		root := filepath.Join(syncDir, sync.CourseFolder(c.Code))
+		children := BuildTree(c.ID, root, files)
+		var size int64
+		for _, ch := range children {
+			size += ch.Size
+		}
+		out = append(out, FileNode{
+			CourseID: c.ID, Name: c.Code, Path: root, RelPath: "",
+			IsDir: true, Size: size, Source: "files",
+			Synced: true, Children: children,
+		})
+	}
+	return out, nil
 }
 
 // GetRecentFiles lists the most recently modified files across all courses.
@@ -336,12 +364,25 @@ func (a *App) runSync(ctx context.Context, cfg config.Settings) {
 	a.emit("deadlines:updated")
 
 	if err == nil {
-		if anns, e := a.st.UnnotifiedAnnouncements(); e == nil && len(anns) > 0 {
-			out := make([]Announcement, 0, len(anns))
-			for _, an := range anns {
-				out = append(out, toAnnouncement(an))
+		// Only announcements first seen in this run. The `notified` flag is the
+		// Telegram scheduler's, and stays set-free while the bot is unpaired —
+		// keying off it would re-toast the whole backlog on every sync.
+		if len(res.NewAnnouncementIDs) > 0 {
+			fresh := map[int]bool{}
+			for _, id := range res.NewAnnouncementIDs {
+				fresh[id] = true
 			}
-			a.emit("announcements:new", out)
+			if anns, e := a.st.Announcements(len(fresh) * 4); e == nil {
+				out := make([]Announcement, 0, len(fresh))
+				for _, an := range anns {
+					if fresh[an.ID] {
+						out = append(out, toAnnouncement(an))
+					}
+				}
+				if len(out) > 0 {
+					a.emit("announcements:new", out)
+				}
+			}
 		}
 		a.toast("success", fmt.Sprintf("Synced %d files (%s)",
 			res.FilesDownloaded, humanBytes(res.BytesDownloaded)))

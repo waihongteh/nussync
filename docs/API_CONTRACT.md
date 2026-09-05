@@ -20,6 +20,9 @@ type FileNode struct {
     Synced bool /*downloaded locally*/; Children []FileNode /*for dirs*/
 }
 type SearchHit struct { File FileNode; CourseCode string; Snippet string; Score float64 }
+// Snippet marks matched terms with literal <b>…</b> (SQLite FTS5 snippet()).
+// The rest is extracted document text: escape it, then re-enable only those
+// markers (frontend util.snippetHTML).
 type Deadline struct {
     ID int; CourseID int; CourseCode string; Title string
     Type string /*"assignment"|"quiz"|"discussion"*/
@@ -43,7 +46,7 @@ type SyncStatus struct {
     Course string; Done int; Total int; CurrentFile string
     LastRun string; LastError string; BytesDownloaded int64
 }
-type TelegramStatus struct { Configured bool; ChatID string; BotName string }
+type TelegramStatus struct { Configured bool; ChatID string; BotName string /*includes the leading @*/ }
 type Stats struct { Files int; Bytes int64; Courses int; Deadlines int; LastSync string }
 ```
 
@@ -51,7 +54,9 @@ type Stats struct { Files int; Bytes int64; Courses int; Deadlines int; LastSync
 ```
 GetCourses() ([]Course, error)
 SetCourseEnabled(id int, enabled bool) error
-GetTree(courseID int) ([]FileNode, error)          // full nested tree
+GetTree(courseID int) ([]FileNode, error)          // full nested tree; courseID 0
+                                                    // = every course, each wrapped in a
+                                                    // top-level dir node named Course.Code
 GetRecentFiles(limit int) ([]FileNode, error)       // newest ModifiedAt first
 Search(query string, courseID int) ([]SearchHit, error)  // courseID 0 = all; FTS over name + extracted text
 OpenFile(path string) error                          // default app
@@ -78,11 +83,16 @@ GetStats() (Stats, error)
 - `sync:status` payload SyncStatus (throttled ~4/s)
 - `sync:done` payload SyncStatus
 - `deadlines:updated` no payload
-- `announcements:new` payload []Announcement
+- `announcements:new` payload []Announcement (only announcements first seen in
+  that sync — not everything the Telegram scheduler has yet to send)
 - `toast` payload {Level string /*info|success|error*/; Message string}
 
 ## Storage
 - Config: `%APPDATA%/NUSSync/config.json`. On first run, if `.env` in cwd has
   CANVAS_URL/CANVAS_TOKEN/TELEGRAM_TOKEN, import them. Bot username: @nuscanvassync_bot.
 - DB: `%APPDATA%/NUSSync/nussync.db` (SQLite, modernc.org/sqlite, FTS5).
-- Default SyncDir: `%USERPROFILE%/NUSSync/<CourseCode>/...`
+- Default SyncDir: `%USERPROFILE%/NUSSync/<CourseFolder>/...` where CourseFolder
+  is the first "/"-separated segment of `Course.Code` (cross-listed modules such
+  as `TR3202S/TR3202T/ETP3201S/...` land in `TR3202S/`). The full code stays in
+  the DB and the UI. `sync.MigrateCourseFolders` renames libraries still using
+  the old `_`-joined naming and rewrites stored paths, so nothing re-downloads.

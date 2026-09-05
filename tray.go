@@ -2,8 +2,6 @@ package main
 
 import (
 	"log"
-	"os"
-	"path/filepath"
 
 	"github.com/energye/systray"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -58,17 +56,12 @@ func onTrayReady(a *App) {
 	})
 }
 
-// trayIcon prefers the .ico next to the executable / in build/windows, and
-// falls back to the embedded PNG.
+// trayIcon returns the same artwork as the app/exe icon. The .ico is embedded
+// (Windows systray needs ICO bytes), so the tray works from any working
+// directory; the PNG is only a fallback for non-Windows builds.
 func trayIcon() []byte {
-	candidates := []string{filepath.Join("build", "windows", "icon.ico")}
-	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "icon.ico"))
-	}
-	for _, p := range candidates {
-		if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
-			return b
-		}
+	if len(appIconICO) > 0 {
+		return appIconICO
 	}
 	return appIconPNG
 }

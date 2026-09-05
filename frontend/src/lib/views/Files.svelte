@@ -5,7 +5,7 @@
   import Icon from '../components/Icon.svelte';
   import { courses, courseByID, flatFiles, openFileNode, selectedCourseID, toast } from '../stores';
   import type { FileNode, MenuItem, SearchHit } from '../types';
-  import { debounce, fileKind, fmtBytes, lsGet, lsSet, relTime } from '../util';
+  import { debounce, fileKind, fmtBytes, lsGet, lsSet, relTime, snippetHTML } from '../util';
 
   const KIND_ICON: Record<string, string> = {
     pdf: 'fileText',
@@ -321,7 +321,7 @@
                   <span class="truncate hit-name">{h.File.Name}</span>
                   <span class="hit-course">{h.CourseCode}</span>
                 </span>
-                <span class="hit-snip truncate">{h.Snippet}</span>
+                <span class="hit-snip truncate">{@html snippetHTML(h.Snippet)}</span>
               </button>
             {/each}
           </div>
@@ -643,5 +643,12 @@
     font-size: 12px;
     color: var(--text-muted);
     padding-left: 21px;
+  }
+
+  .hit-snip :global(mark) {
+    background: var(--accent-soft, rgba(91, 91, 214, 0.18));
+    color: var(--text);
+    border-radius: 3px;
+    padding: 0 1px;
   }
 </style>

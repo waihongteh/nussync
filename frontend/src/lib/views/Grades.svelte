@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from '../components/Icon.svelte';
   import { courses, grades, openExternal } from '../stores';
-  import { fmtDate } from '../util';
+  import { fmtDate, fmtScore } from '../util';
   import type { Grade } from '../types';
 
   interface Group {
@@ -62,7 +62,7 @@
           <span class="name truncate muted">{g.name}</span>
           <span class="overall">
             <span class="chip {tone(overall)}">{overall.toFixed(1)}%</span>
-            <span class="raw faint">{g.score} / {g.possible}</span>
+            <span class="raw faint">{fmtScore(g.score)} / {fmtScore(g.possible)}</span>
           </span>
         </div>
 
@@ -80,7 +80,7 @@
               {@const p = pct(item.Score, item.Possible)}
               <tr onclick={() => openExternal(item.URL)}>
                 <td class="c-title truncate">{item.Title}</td>
-                <td class="c-score">{item.Score} / {item.Possible}</td>
+                <td class="c-score">{fmtScore(item.Score)} / {fmtScore(item.Possible)}</td>
                 <td class="c-bar">
                   <span class="bar-wrap">
                     <span class="bar"><span class="fill {tone(p)}" style="width:{p}%"></span></span>

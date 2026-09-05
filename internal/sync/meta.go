@@ -120,7 +120,7 @@ func (e *Engine) refreshCourseMeta(ctx context.Context, c store.Course) error {
 			if url == "" {
 				url = a.URL
 			}
-			if _, err := e.Store.UpsertAnnouncement(store.Announcement{
+			isNew, err := e.Store.UpsertAnnouncement(store.Announcement{
 				ID:         a.ID,
 				CourseID:   c.ID,
 				CourseCode: c.Code,
@@ -129,8 +129,12 @@ func (e *Engine) refreshCourseMeta(ctx context.Context, c store.Course) error {
 				HTML:       a.Message,
 				Text:       HTMLToText(a.Message),
 				URL:        url,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
+			}
+			if isNew {
+				e.newAnns = append(e.newAnns, a.ID)
 			}
 		}
 	}

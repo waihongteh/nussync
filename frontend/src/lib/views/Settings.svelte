@@ -16,7 +16,7 @@
   let canvasName = $state('');
   let canvasError = $state('');
 
-  let tg = $state<TelegramStatus>({ Configured: false, ChatID: '', BotName: 'nuscanvassync_bot' });
+  let tg = $state<TelegramStatus>({ Configured: false, ChatID: '', BotName: '@nuscanvassync_bot' });
   let pairing = $state(false);
   let sendingTest = $state(false);
 
@@ -346,13 +346,13 @@
             <div class="tg-icon"><Icon name="telegram" size={16} /></div>
             <div class="tg-body">
               {#if tg.Configured}
-                <div class="tg-title">Paired with @{tg.BotName || 'nuscanvassync_bot'}</div>
+                <div class="tg-title">Paired with {tg.BotName || '@nuscanvassync_bot'}</div>
                 <div class="tg-sub">Chat ID <span class="mono">{tg.ChatID}</span></div>
               {:else}
                 <div class="tg-title">Not paired yet</div>
                 <div class="tg-sub">
                   Open Telegram, send <span class="mono">/start</span> to
-                  <span class="mono">@{tg.BotName || 'nuscanvassync_bot'}</span>, then click Pair — NUSSync waits up to 60&nbsp;seconds
+                  <span class="mono">{tg.BotName || '@nuscanvassync_bot'}</span>, then click Pair — NUSSync waits up to 60&nbsp;seconds
                   for your message.
                 </div>
               {/if}

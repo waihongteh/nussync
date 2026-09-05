@@ -477,3 +477,17 @@ func (s *Store) Stats() (Stats, error) {
 	st.LastSync, _ = s.GetKV("last_sync")
 	return st, nil
 }
+
+// RewriteCoursePaths rewrites the abs_path prefix of every file in a course
+// after its on-disk folder was renamed. Both prefixes are native paths.
+func (s *Store) RewriteCoursePaths(courseID int, oldPrefix, newPrefix string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(
+		`UPDATE files SET abs_path = ? || substr(abs_path, ?) WHERE course_id=? AND substr(abs_path,1,?) = ?`,
+		newPrefix, len(oldPrefix)+1, courseID, len(oldPrefix), oldPrefix)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
