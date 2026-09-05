@@ -150,10 +150,53 @@ to cwd, which only worked when run from the repo.
   nobody has sent `/start`, so `getUpdates` is empty and `--notify-test` exits 1
   by design. Send `/start` to the bot then run `nussync --pair`.
 
+## Pages source (2026-09-05, third sync source)
+- Some courses publish every lecture note as a **link inside a module Page**,
+  never as a File item, with an empty Files tab (CS4246/CS5446, course 97040,
+  is the motivating case). `Source = "pages"` now covers those.
+- Crawled bodies: module items of type `Page` (`page_url`), standalone wiki
+  pages from `/courses/:id/pages` not referenced by any module, assignment
+  `description`, announcement `message`. Quizzes/discussion bodies were
+  deliberately left out — scope.
+- Extractor `sync.FileIDsInHTML` (`internal/sync/links.go`) is a single
+  `/files/([0-9]+)` regex over the body. That one pattern covers `?wrap=1`
+  hrefs, `/download?download_frd=1`, `data-api-endpoint`, `<img src=.../preview>`
+  and bare `/files/N`; the digit run is greedy so nothing matches truncated.
+  Bodies are pre-normalised for JSON `\/` escapes and `&amp;`. Table-tested in
+  `internal/sync/links_test.go`.
+- A link may point at **another course's** file. Those are kept, resolved via
+  `/api/v1/files/:id`, and 401/403/404 is swallowed per id. `/courses/:id/pages`
+  itself 403/404s when the Pages tab is disabled — non-fatal.
+- Priority when one file id appears in several sources: **files-tab > modules >
+  pages**, and a row already stored under a different course with an
+  authoritative source is never demoted to "pages" (`Engine.claimed` also stops
+  two courses fighting over the same id within a run).
+- Layout: `Modules/<module>/<page>/...` for module pages, `Pages/<page>/...`,
+  `Assignments/<name>/...`, `Announcements/<title>/...` (`sync.RelPathForPage`).
+  `FileNode.Module` carries the same label ("<Module> / <Page>", "Pages / <P>",
+  "Assignments / <name>", "Announcements / <title>"); contract updated.
+- Caching: new `pages(course_id, url, title, updated_at, file_ids)` table. The
+  list endpoint returns `updated_at` without the body, so an unchanged page
+  skips its body fetch entirely. New `files.origin` column (additive
+  `ALTER TABLE` via `store.addColumn`, safe on existing DBs) records
+  `page:<slug>` / `assignment:<id>` / `announcement:<id>`.
+- `Assignments`/`Announcements` are memoised per run (`Engine.assnCache` /
+  `annCache`, cleared by `resetCaches`) because both the crawl and the metadata
+  refresh need them.
+- First run: **23 new files, 15.3 MB**. CS4246/CS5446 15 (Course Overview,
+  Lecture-Intro, Lecture-classic v4.0 = "Classical (Symbolic) Planning",
+  Lecture-complex, Lecture-rational-utility, Lecture-mdp, Lecture-sdm, 3
+  tutorials, Assignment-1 + programming package, project guidelines), TPC 4
+  (FAQ screenshots), NUSC1101 2, NOC 1, TR3201N 1 — the last two from
+  announcement images. Library 100 -> 123 files. Second run downloaded 0 and
+  ran ~17s faster thanks to the page cache.
+
 ## Dead ends
 - Sanitizing the whole cross-listed course code into one folder name.
 - FTS5 contentless tables (`content=''`) — `snippet()` cannot work on them.
 - `regexp.MustCompile` with a backreference (`</\1>`) — panics at init in RE2.
+- Guarding `FileIDsInHTML` with `strings.Contains(body, "/files/")` *before*
+  unescaping `\/` — JSON-escaped bodies then extract nothing. Normalise first.
 
 ## Operational
 - Toolchain: Go 1.27 (`C:\Program Files\Go\bin`), wails CLI in `~/go/bin`,
@@ -163,11 +206,20 @@ to cwd, which only worked when run from the repo.
   contract in `docs/API_CONTRACT.md` is the source of truth for bindings.
 
 ## Queued (user requests 2026-09-05 night)
-- Files linked from module Pages (e.g. CS4246 has 0 File items, 5 Page items;
-  sample: /courses/97040/pages/week-1-overview). Fetch page body via
-  /api/v1/courses/:id/pages/:slug, regex `/files/(\d+)`, download via
-  /api/v1/files/:id. Also crawl /courses/:id/pages and assignment/announcement
-  bodies for attachments.
+- [x] Files linked from module Pages — done, see "Pages source" above.
 - Canvas pet in sidebar: mood from deadlines/sync, click quips, level from
   synced files + on-time submissions, nameable, can be disabled.
 - Dark theme: already implemented (Settings > App > Theme); verify in real app.
+- Extra features approved 2026-09-05 ("useful, not redundant"): What's-new
+  feed + New badges + Windows toast; Telegram two-way commands (/due /new
+  /files /sync); assignment detail panel + class score stats; tray next-3
+  deadlines; global hotkey Ctrl+Shift+N. Rejected: timetable (NUSMods),
+  submit-from-app, favourites, Panopto/Zoom recordings.
+- Study/AI panel (approved 2026-09-05, ON-DEMAND ONLY, never auto): Overview,
+  Quiz (MCQ+short, self-test mode), Ask (Q&A with page cites), Flashcards.
+  NO API key (user has none). Backend shells out to the installed Claude
+  Code CLI (`claude -p ... --output-format json --allowedTools Read`,
+  v2.1.251 at %APPDATA%/npm/claude) which uses the user's subscription.
+  Claude Code reads the PDF itself. Model dropdown opus/sonnet. Show page
+  count before run; stream/cancel; cache outputs in SQLite. Anthropic Go SDK
+  rejected: needs API key.

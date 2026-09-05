@@ -79,6 +79,26 @@ type ModuleItem struct {
 	ContentID int    `json:"content_id"`
 	HTMLURL   string `json:"html_url"`
 	URL       string `json:"url"`
+	// PageURL is the wiki page slug, set only on items of type "Page".
+	PageURL string `json:"page_url"`
+}
+
+// Page is a course wiki page. The list endpoint omits Body; PageBody fills it.
+type Page struct {
+	URL       string     `json:"url"` // slug, e.g. "week-1-overview"
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	UpdatedAt *time.Time `json:"updated_at"`
+	Published bool       `json:"published"`
+	HTMLURL   string     `json:"html_url"`
+}
+
+// Stamp returns the page's updated_at as RFC3339, or "" when unknown.
+func (p Page) Stamp() string {
+	if p.UpdatedAt == nil || p.UpdatedAt.IsZero() {
+		return ""
+	}
+	return p.UpdatedAt.UTC().Format(time.RFC3339)
 }
 
 // Module is a course module with (optionally inlined) items.
@@ -109,6 +129,7 @@ type Assignment struct {
 	DueAt                   *time.Time  `json:"due_at"`
 	LockAt                  *time.Time  `json:"lock_at"`
 	HTMLURL                 string      `json:"html_url"`
+	Description             string      `json:"description"`
 	PointsPossible          float64     `json:"points_possible"`
 	SubmissionTypes         []string    `json:"submission_types"`
 	HasSubmittedSubmissions bool        `json:"has_submitted_submissions"`

@@ -89,16 +89,17 @@ func (s *Store) UpsertFile(f File) error {
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`
 		INSERT INTO files(id, course_id, name, rel_path, abs_path, size, modified_at,
-		                  updated_at, source, module, synced, content_hash, indexed, url)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		                  updated_at, source, module, synced, content_hash, indexed, url, origin)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET
 			course_id=excluded.course_id, name=excluded.name, rel_path=excluded.rel_path,
 			abs_path=excluded.abs_path, size=excluded.size, modified_at=excluded.modified_at,
 			updated_at=excluded.updated_at, source=excluded.source, module=excluded.module,
 			synced=excluded.synced, content_hash=excluded.content_hash,
-			indexed=excluded.indexed, url=excluded.url`,
+			indexed=excluded.indexed, url=excluded.url, origin=excluded.origin`,
 		f.ID, f.CourseID, f.Name, f.RelPath, f.AbsPath, f.Size, f.ModifiedAt,
-		f.UpdatedAt, f.Source, f.Module, b2i(f.Synced), f.ContentHash, b2i(f.Indexed), f.URL)
+		f.UpdatedAt, f.Source, f.Module, b2i(f.Synced), f.ContentHash, b2i(f.Indexed),
+		f.URL, f.Origin)
 	return err
 }
 
@@ -117,7 +118,8 @@ func (s *Store) FileByID(id int) (File, bool, error) {
 }
 
 const fileSelect = `SELECT id, course_id, name, rel_path, abs_path, size, modified_at,
-       updated_at, source, module, synced, content_hash, indexed, url FROM files`
+       updated_at, source, module, synced, content_hash, indexed, url,
+       COALESCE(origin,'') FROM files`
 
 func scanFiles(rows *sql.Rows) ([]File, error) {
 	var out []File
@@ -126,7 +128,7 @@ func scanFiles(rows *sql.Rows) ([]File, error) {
 		var synced, indexed int
 		if err := rows.Scan(&f.ID, &f.CourseID, &f.Name, &f.RelPath, &f.AbsPath, &f.Size,
 			&f.ModifiedAt, &f.UpdatedAt, &f.Source, &f.Module, &synced, &f.ContentHash,
-			&indexed, &f.URL); err != nil {
+			&indexed, &f.URL, &f.Origin); err != nil {
 			return nil, err
 		}
 		f.Synced = synced != 0

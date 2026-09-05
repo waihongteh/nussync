@@ -21,8 +21,9 @@ type File struct {
 	Size        int64
 	ModifiedAt  string // RFC3339
 	UpdatedAt   string // RFC3339
-	Source      string // "files" | "modules"
+	Source      string // "files" | "modules" | "pages"
 	Module      string
+	Origin      string // where a "pages" file was linked from (page URL etc.)
 	Synced      bool
 	ContentHash string
 	Indexed     bool

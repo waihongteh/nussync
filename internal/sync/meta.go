@@ -15,6 +15,7 @@ import (
 // RefreshMetadata refreshes courses plus deadlines/announcements/grades for
 // every enabled course, without downloading any files.
 func (e *Engine) RefreshMetadata(ctx context.Context) error {
+	e.resetCaches()
 	courses, err := e.Client.ActiveCourses(ctx)
 	if err != nil {
 		return err
@@ -62,7 +63,7 @@ func (e *Engine) RefreshMetadata(ctx context.Context) error {
 func (e *Engine) refreshCourseMeta(ctx context.Context, c store.Course) error {
 	var firstErr error
 
-	assignments, err := e.Client.Assignments(ctx, c.ID)
+	assignments, err := e.assignments(ctx, c.ID)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return err
@@ -106,7 +107,7 @@ func (e *Engine) refreshCourseMeta(ctx context.Context, c store.Course) error {
 		}
 	}
 
-	anns, err := e.Client.Announcements(ctx, c.ID)
+	anns, err := e.announcements(ctx, c.ID)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return err

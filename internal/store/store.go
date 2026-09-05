@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -72,7 +75,8 @@ CREATE TABLE IF NOT EXISTS files (
   synced       INTEGER NOT NULL DEFAULT 0,
   content_hash TEXT NOT NULL DEFAULT '',
   indexed      INTEGER NOT NULL DEFAULT 0,
-  url          TEXT NOT NULL DEFAULT ''
+  url          TEXT NOT NULL DEFAULT '',
+  origin       TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_files_course ON files(course_id);
 CREATE INDEX IF NOT EXISTS idx_files_modified ON files(modified_at DESC);
@@ -127,6 +131,18 @@ CREATE TABLE IF NOT EXISTS reminders_sent (
   PRIMARY KEY (assignment_id, rung)
 );
 
+-- Cached wiki-page metadata so unchanged pages are not re-fetched every sync.
+-- file_ids is the comma-separated list extracted from the page body.
+CREATE TABLE IF NOT EXISTS pages (
+  course_id  INTEGER NOT NULL,
+  url        TEXT NOT NULL,
+  title      TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT '',
+  file_ids   TEXT NOT NULL DEFAULT '',
+  fetched_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (course_id, url)
+);
+
 CREATE TABLE IF NOT EXISTS kv (
   k TEXT PRIMARY KEY,
   v TEXT NOT NULL DEFAULT ''
@@ -137,7 +153,93 @@ func (s *Store) migrate() error {
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("store: migrate: %w", err)
 	}
+	// Added 2026-09: records where a "pages"-sourced file was linked from.
+	// CREATE TABLE IF NOT EXISTS above does nothing for pre-existing databases.
+	if err := s.addColumn("files", "origin", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return fmt.Errorf("store: migrate files.origin: %w", err)
+	}
 	return nil
+}
+
+// addColumn adds a column when the table does not already have it.
+func (s *Store) addColumn(table, col, decl string) error {
+	rows, err := s.db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid, notnull, pk int
+			name, typ        string
+			dflt             any
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == col {
+			return rows.Close()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	_, err = s.db.Exec("ALTER TABLE " + table + " ADD COLUMN " + col + " " + decl)
+	return err
+}
+
+// PageCache is the cached metadata of one Canvas wiki page.
+type PageCache struct {
+	CourseID  int
+	URL       string
+	Title     string
+	UpdatedAt string // Canvas updated_at, RFC3339
+	FileIDs   []int
+}
+
+// PageCacheGet loads the cached row for a page, if any.
+func (s *Store) PageCacheGet(courseID int, pageURL string) (PageCache, bool, error) {
+	var (
+		pc  = PageCache{CourseID: courseID, URL: pageURL}
+		ids string
+	)
+	err := s.db.QueryRow(`SELECT title, updated_at, file_ids FROM pages WHERE course_id=? AND url=?`,
+		courseID, pageURL).Scan(&pc.Title, &pc.UpdatedAt, &ids)
+	if err == sql.ErrNoRows {
+		return PageCache{}, false, nil
+	}
+	if err != nil {
+		return PageCache{}, false, err
+	}
+	for _, part := range strings.Split(ids, ",") {
+		if part == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(part); err == nil {
+			pc.FileIDs = append(pc.FileIDs, n)
+		}
+	}
+	return pc, true, nil
+}
+
+// PageCachePut stores (or refreshes) the cached row for a page.
+func (s *Store) PageCachePut(pc PageCache) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	parts := make([]string, 0, len(pc.FileIDs))
+	for _, id := range pc.FileIDs {
+		parts = append(parts, strconv.Itoa(id))
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO pages(course_id, url, title, updated_at, file_ids, fetched_at)
+		VALUES(?,?,?,?,?,?)
+		ON CONFLICT(course_id, url) DO UPDATE SET
+			title=excluded.title, updated_at=excluded.updated_at,
+			file_ids=excluded.file_ids, fetched_at=excluded.fetched_at`,
+		pc.CourseID, pc.URL, pc.Title, pc.UpdatedAt, strings.Join(parts, ","),
+		time.Now().UTC().Format(time.RFC3339))
+	return err
 }
 
 // GetKV reads a key, returning "" when absent.

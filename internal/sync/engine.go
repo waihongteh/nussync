@@ -22,6 +22,11 @@ import (
 const (
 	SourceFiles   = "files"
 	SourceModules = "modules"
+	// SourcePages covers files that exist only as links inside rich text —
+	// module Pages, standalone wiki pages, assignment descriptions and
+	// announcement bodies. Some courses (e.g. CS4246) publish every lecture
+	// note this way and have an empty Files tab.
+	SourcePages = "pages"
 )
 
 // Progress is reported to the caller during a run.
@@ -62,6 +67,16 @@ type Engine struct {
 	// newAnns collects announcement IDs inserted by this run. Only written
 	// from the sequential metadata loop.
 	newAnns []int
+
+	// Per-run memo caches. Assignments and announcements are needed by both
+	// the rich-text file crawl and the metadata refresh; claimed records file
+	// ids already taken by a "pages" candidate, so two courses linking the
+	// same file do not fight over the row.
+	assnCache map[int][]canvas.Assignment
+	assnErr   map[int]error
+	annCache  map[int][]canvas.DiscussionTopic
+	annErr    map[int]error
+	claimed   map[int]bool
 }
 
 // New builds an engine.
@@ -81,12 +96,17 @@ type candidate struct {
 	Source     string
 	FolderPath string
 	Module     string
+	// Dir and Origin are only set for SourcePages candidates: the logical
+	// destination directory and a note of which page/assignment linked it.
+	Dir    string
+	Origin string
 }
 
 // Run performs a full sync: refresh courses, then per enabled course list and
 // download files, then refresh deadlines/announcements/grades, then index.
 func (e *Engine) Run(ctx context.Context) (Result, error) {
 	var res Result
+	e.resetCaches()
 
 	e.report(Progress{Phase: "listing", Course: "Courses"})
 	courses, err := e.Client.ActiveCourses(ctx)
@@ -259,6 +279,11 @@ func (e *Engine) syncCourse(ctx context.Context, c store.Course, res *Result) er
 		}
 	}
 
+	// --- Files linked only from rich text (pages / assignments / announcements) ---
+	if err := e.collectFromHTML(ctx, c, modules, cands, res); err != nil {
+		return err
+	}
+
 	// --- Decide what to download ---
 	type job struct {
 		cand candidate
@@ -278,6 +303,9 @@ func (e *Engine) syncCourse(ctx context.Context, c store.Course, res *Result) er
 			continue
 		}
 		rel := RelPathFor(cd.Source, cd.FolderPath, cd.Module, name)
+		if cd.Source == SourcePages {
+			rel = RelPathForPage(cd.Dir, name)
+		}
 		abs := AbsPathFor(e.Settings.SyncDir, c.Code, rel)
 
 		row := store.File{
@@ -291,6 +319,7 @@ func (e *Engine) syncCourse(ctx context.Context, c store.Course, res *Result) er
 			UpdatedAt:  rfc(derefTime(cd.File.UpdatedAt)),
 			Source:     cd.Source,
 			Module:     cd.Module,
+			Origin:     cd.Origin,
 			URL:        cd.File.URL,
 		}
 

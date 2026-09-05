@@ -25,7 +25,7 @@ type FileNode struct {
 	IsDir      bool
 	Size       int64
 	ModifiedAt string // RFC3339
-	Source     string // "files" | "modules"
+	Source     string // "files" | "modules" | "pages"
 	Module     string // module title or ""
 	Synced     bool   // downloaded locally
 	Children   []FileNode

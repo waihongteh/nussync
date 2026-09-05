@@ -137,3 +137,16 @@ func AbsPathFor(syncDir, courseCode, rel string) string {
 		strings.Split(SanitizeRel(rel), "/")...)
 	return filepath.Join(segs...)
 }
+
+// RelPathForPage computes the course-relative destination for a file that was
+// only discovered as a link inside an HTML body. dir is the already-composed
+// logical directory ("Modules/<module>/<page>", "Pages/<page>",
+// "Assignments/<name>", "Announcements/<title>"); every segment is sanitized.
+func RelPathForPage(dir, name string) string {
+	d := SanitizeRel(dir)
+	n := SanitizeSegment(name)
+	if d == "" {
+		return n
+	}
+	return d + "/" + n
+}

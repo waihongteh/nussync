@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -206,4 +207,29 @@ func SortFolders(fs []Folder) {
 		}
 		return a < b
 	})
+}
+
+// Pages lists a course's wiki pages (bodies omitted by Canvas). Courses with
+// the Pages tab disabled answer 403/404; callers treat that as "no pages".
+func (c *Client) Pages(ctx context.Context, courseID int) ([]Page, error) {
+	var out []Page
+	err := c.getPaged(ctx, fmt.Sprintf("/api/v1/courses/%d/pages?per_page=100", courseID),
+		func(b []byte) error {
+			var page []Page
+			if err := json.Unmarshal(b, &page); err != nil {
+				return err
+			}
+			out = append(out, page...)
+			return nil
+		})
+	return out, err
+}
+
+// PageBody fetches one wiki page including its body HTML. pageURL is the page
+// slug ("week-1-overview"), as carried by module items in page_url.
+func (c *Client) PageBody(ctx context.Context, courseID int, pageURL string) (Page, error) {
+	var p Page
+	err := c.getJSON(ctx, fmt.Sprintf("/api/v1/courses/%d/pages/%s",
+		courseID, url.PathEscape(pageURL)), &p)
+	return p, err
 }

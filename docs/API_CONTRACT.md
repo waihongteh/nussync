@@ -16,7 +16,9 @@ type FileNode struct {
     ID int /*canvas file id, 0 for folder*/; CourseID int
     Name string; Path string /*absolute local path*/; RelPath string
     IsDir bool; Size int64; ModifiedAt string /*RFC3339*/
-    Source string /*"files"|"modules"*/; Module string /*module title or ""*/
+    Source string /*"files"|"modules"|"pages"*/; Module string /*module title, or
+      for "pages" the linking context: "<Module> / <Page>", "Pages / <Page>",
+      "Assignments / <name>", "Announcements / <title>"; "" when unknown*/
     Synced bool /*downloaded locally*/; Children []FileNode /*for dirs*/
 }
 type SearchHit struct { File FileNode; CourseCode string; Snippet string; Score float64 }
