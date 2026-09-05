@@ -1,0 +1,129 @@
+package main
+
+// Contract types shared with the frontend. JSON field names are the Go field
+// names exactly (no json tags) — do not rename. See docs/API_CONTRACT.md.
+
+// Course is an enrolled Canvas course.
+type Course struct {
+	ID         int
+	Code       string
+	Name       string
+	Term       string
+	FileCount  int
+	LastSynced string // RFC3339 or ""
+	Enabled    bool
+	Color      string // hex, deterministic from ID
+}
+
+// FileNode is a file or directory in the local library tree.
+type FileNode struct {
+	ID         int // canvas file id, 0 for folder
+	CourseID   int
+	Name       string
+	Path       string // absolute local path
+	RelPath    string
+	IsDir      bool
+	Size       int64
+	ModifiedAt string // RFC3339
+	Source     string // "files" | "modules"
+	Module     string // module title or ""
+	Synced     bool   // downloaded locally
+	Children   []FileNode
+}
+
+// SearchHit is one full-text search result.
+type SearchHit struct {
+	File       FileNode
+	CourseCode string
+	Snippet    string
+	Score      float64
+}
+
+// Deadline is an upcoming or overdue assignment/quiz/discussion.
+type Deadline struct {
+	ID             int
+	CourseID       int
+	CourseCode     string
+	Title          string
+	Type           string // "assignment" | "quiz" | "discussion"
+	DueAt          string // RFC3339
+	Submitted      bool
+	URL            string
+	PointsPossible float64
+}
+
+// Announcement is a course announcement.
+type Announcement struct {
+	ID         int
+	CourseCode string
+	Title      string
+	PostedAt   string
+	HTML       string
+	Text       string // plain
+	URL        string
+	Read       bool
+}
+
+// Grade is a graded submission.
+type Grade struct {
+	CourseCode string
+	Title      string
+	Score      float64
+	Possible   float64
+	GradedAt   string
+	URL        string
+}
+
+// Settings is the user-editable configuration.
+type Settings struct {
+	CanvasURL      string
+	CanvasToken    string
+	SyncDir        string
+	TelegramToken  string
+	TelegramChatID string
+
+	ReminderLadder []string // Go durations e.g. ["72h","48h","24h","3h","1h"]
+	MaxFileMB      int      // skip larger; 0 = no limit
+	SkipExts       []string // [".mp4"]
+
+	SyncIntervalMin     int
+	NotifyAnnouncements bool
+	NotifyGrades        bool
+	LaunchAtLogin       bool
+	Theme               string // "system" | "light" | "dark"
+}
+
+// SyncStatus is the live state of the sync engine.
+type SyncStatus struct {
+	Running         bool
+	Phase           string // "idle" | "listing" | "downloading" | "indexing" | "error"
+	Course          string
+	Done            int
+	Total           int
+	CurrentFile     string
+	LastRun         string
+	LastError       string
+	BytesDownloaded int64
+}
+
+// TelegramStatus describes the bot pairing state.
+type TelegramStatus struct {
+	Configured bool
+	ChatID     string
+	BotName    string
+}
+
+// Stats summarises the local library.
+type Stats struct {
+	Files     int
+	Bytes     int64
+	Courses   int
+	Deadlines int
+	LastSync  string
+}
+
+// Toast is the payload of the `toast` event.
+type Toast struct {
+	Level   string // "info" | "success" | "error"
+	Message string
+}

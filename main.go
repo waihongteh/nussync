@@ -1,36 +1,74 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"fmt"
+	"log"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIconPNG []byte
+
+const cliHelp = `NUSSync - Canvas LMS desktop sync
+
+Usage:
+  nussync                 start the desktop app
+  nussync --sync          run one sync to stdout and exit
+  nussync --check         print upcoming deadlines and exit
+  nussync --pair          wait for /start on Telegram and save the chat id
+  nussync --notify-test   send a Telegram test message
+`
+
 func main() {
-	// Create an instance of the app structure
+	// CLI modes run headless and exit; useful for testing without the GUI.
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "--sync", "--check", "--notify-test", "--pair":
+			os.Exit(runCLI(arg))
+		case "-h", "--help":
+			fmt.Print(cliHelp)
+			return
+		}
+	}
+
 	app := NewApp()
 
-	// Create application with options
 	err := wails.Run(&options.App{
-		Title:  "nussync",
-		Width:  1024,
-		Height: 768,
+		Title:     "NUSSync",
+		Width:     1200,
+		Height:    780,
+		MinWidth:  900,
+		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		OnStartup:        app.startup,
+		BackgroundColour:  &options.RGBA{R: 15, G: 17, B: 21, A: 1},
+		HideWindowOnClose: true,
+		OnStartup: func(ctx context.Context) {
+			app.startup(ctx)
+			startTray(app)
+		},
+		OnShutdown: app.shutdown,
 		Bind: []interface{}{
 			app,
 		},
+		Windows: &windows.Options{
+			WebviewIsTransparent: false,
+			WindowIsTranslucent:  false,
+			Theme:                windows.SystemDefault,
+		},
 	})
-
 	if err != nil {
-		println("Error:", err.Error())
+		log.Printf("nussync: %v", err)
 	}
 }
