@@ -47,9 +47,11 @@
   const NAV_COMMANDS: Array<{ label: string; icon: string; route: Route }> = [
     { label: 'Go to Home', icon: 'home', route: 'home' },
     { label: 'Go to Files', icon: 'files', route: 'files' },
+    { label: "Go to What's new", icon: 'dot', route: 'whatsnew' },
     { label: 'Go to Deadlines', icon: 'deadlines', route: 'deadlines' },
     { label: 'Go to Announcements', icon: 'announcements', route: 'announcements' },
     { label: 'Go to Grades', icon: 'grades', route: 'grades' },
+    { label: 'Go to Study', icon: 'layers', route: 'study' },
     { label: 'Go to Arcade', icon: 'gamepad', route: 'arcade' },
     { label: 'Go to Settings', icon: 'settings', route: 'settings' },
   ];
@@ -97,6 +99,14 @@
       hint: 'Arcade',
       icon: 'gamepad',
       run: () => playGame('merge'),
+    },
+    {
+      key: 'cmd:play-rush',
+      kind: 'command' as const,
+      label: 'Play: Quiz Rush',
+      hint: 'Arcade',
+      icon: 'trophy',
+      run: () => playGame('quiz-rush'),
     },
     {
       key: 'cmd:theme-light',

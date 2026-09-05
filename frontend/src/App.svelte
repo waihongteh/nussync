@@ -21,13 +21,17 @@
   import Grades from './lib/views/Grades.svelte';
   import Home from './lib/views/Home.svelte';
   import Settings from './lib/views/Settings.svelte';
+  import Study from './lib/views/Study.svelte';
+  import WhatsNew from './lib/views/WhatsNew.svelte';
 
   const TITLES: Record<string, string> = {
     home: 'Home',
     files: 'Files',
+    whatsnew: "What's new",
     deadlines: 'Deadlines',
     announcements: 'Announcements',
     grades: 'Grades',
+    study: 'Study',
     arcade: 'Arcade',
     settings: 'Settings',
   };
@@ -100,6 +104,10 @@
         <Announcements />
       {:else if $route === 'grades'}
         <Grades />
+      {:else if $route === 'whatsnew'}
+        <WhatsNew />
+      {:else if $route === 'study'}
+        <Study />
       {:else if $route === 'arcade'}
         <Arcade />
       {:else if $route === 'settings'}

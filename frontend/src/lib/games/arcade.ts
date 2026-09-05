@@ -6,7 +6,7 @@
 import { writable } from 'svelte/store';
 import { navigate } from '../stores';
 
-export type ArcadeGame = 'run-daily' | 'run-free' | 'merge';
+export type ArcadeGame = 'run-daily' | 'run-free' | 'merge' | 'quiz-rush';
 
 /** `null` = show the picker. */
 export const arcadePick = writable<ArcadeGame | null>(null);

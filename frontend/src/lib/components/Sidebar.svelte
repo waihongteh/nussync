@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { courses, navigate, route, selectedCourseID, unreadAnnouncements, upcomingCount } from '../stores';
+  import { courses, navigate, route, selectedCourseID, unreadAnnouncements, unseenCount, upcomingCount } from '../stores';
   import type { Route } from '../stores';
   import Icon from './Icon.svelte';
   import Pet from './Pet.svelte';
@@ -9,9 +9,11 @@
   const NAV: Array<{ id: Route; label: string; icon: string }> = [
     { id: 'home', label: 'Home', icon: 'home' },
     { id: 'files', label: 'Files', icon: 'files' },
+    { id: 'whatsnew', label: "What's new", icon: 'dot' },
     { id: 'deadlines', label: 'Deadlines', icon: 'deadlines' },
     { id: 'announcements', label: 'Announcements', icon: 'announcements' },
     { id: 'grades', label: 'Grades', icon: 'grades' },
+    { id: 'study', label: 'Study', icon: 'layers' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
     { id: 'arcade', label: 'Play', icon: 'gamepad' },
   ];
@@ -19,6 +21,7 @@
   function badgeFor(id: Route): number {
     if (id === 'deadlines') return $upcomingCount;
     if (id === 'announcements') return $unreadAnnouncements;
+    if (id === 'whatsnew') return $unseenCount;
     return 0;
   }
 

@@ -23,6 +23,7 @@
   import { dailyBestToday, mergeSave, runSave } from '../games/scores';
   import { drawFileGlyph, drawPet } from '../games/sprites';
   import LectureMerge from '../games/LectureMerge.svelte';
+  import QuizRush from './QuizRush.svelte';
   import NibbleRun from '../games/NibbleRun.svelte';
 
   const PREVIEW_W = 268;
@@ -122,12 +123,14 @@
   <NibbleRun mode={$arcadePick === 'run-daily' ? 'daily' : 'free'} onExit={back} />
 {:else if $arcadePick === 'merge'}
   <LectureMerge onExit={back} />
+{:else if $arcadePick === 'quiz-rush'}
+  <QuizRush />
 {:else}
   <div class="view">
     <div class="view-narrow">
       <header class="head">
         <h1 class="page-title">Arcade</h1>
-        <p class="muted sub">Two small breaks. Your deadlines still show up in both.</p>
+        <p class="muted sub">Small breaks. Your deadlines and quizzes still show up.</p>
       </header>
 
       <div class="cards">
@@ -182,6 +185,24 @@
               <button class="btn sm primary" onclick={() => play('merge')}>
                 <Icon name="gamepad" size={13} />
                 Play
+              </button>
+            </div>
+          </div>
+        </section>
+        <section class="card game">
+          <div class="body">
+            <div class="row">
+              <h2 class="name">Quiz Rush</h2>
+              <span class="chip accent">Study bank</span>
+            </div>
+            <p class="muted desc">
+              Race your own quizzes. Three lives, a timer that tightens as your streak grows,
+              a short-answer boss every 10th question. Missed ones come back in a redo pile.
+            </p>
+            <p class="faint keys"><kbd>1</kbd>–<kbd>4</kbd> answer · <kbd>Enter</kbd> continue</p>
+            <div class="actions">
+              <button class="btn sm primary" onclick={() => play('quiz-rush')}>
+                <Icon name="trophy" size={13} /> Play
               </button>
             </div>
           </div>
