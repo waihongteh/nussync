@@ -2,7 +2,9 @@
   import { courses, navigate, route, selectedCourseID, unreadAnnouncements, upcomingCount } from '../stores';
   import type { Route } from '../stores';
   import Icon from './Icon.svelte';
+  import Pet from './Pet.svelte';
   import SyncPill from './SyncPill.svelte';
+  import { petEnabled } from '../pet';
 
   const NAV: Array<{ id: Route; label: string; icon: string }> = [
     { id: 'home', label: 'Home', icon: 'home' },
@@ -73,6 +75,10 @@
       {/if}
     </div>
   </div>
+
+  {#if $petEnabled}
+    <Pet />
+  {/if}
 
   <SyncPill />
 </aside>

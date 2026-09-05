@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, errMsg } from '../api';
   import Icon from '../components/Icon.svelte';
+  import { petEnabled, petName } from '../pet';
   import { courses, loadCourses, settings, theme, toast } from '../stores';
   import type { Settings, TelegramStatus } from '../types';
   import { durLabel, parseDurLabel } from '../util';
@@ -39,6 +40,9 @@
     const s = $settings;
     if (s && draft === null) {
       draft = structuredClone($state.snapshot(s)) as Settings;
+      // The live theme store wins over whatever the backend last stored, so the
+      // dropdown always shows what the window is actually rendering.
+      draft.Theme = $theme;
       baseline = JSON.stringify(draft);
     }
   });
@@ -436,7 +440,7 @@
             <span class="lbl">Theme</span>
             <select
               class="select"
-              value={draft.Theme}
+              value={$theme}
               onchange={(e) => {
                 const v = e.currentTarget.value as Settings['Theme'];
                 if (draft) draft.Theme = v;
@@ -456,6 +460,40 @@
               <span class="switch-title">Launch at login</span>
               <span class="help">Start NUSSync minimised when Windows starts.</span>
             </span>
+          </label>
+        </div>
+      </section>
+
+      <!-- -------------------------------------------------------------- Pet -->
+      <section class="card section">
+        <div class="section-head">
+          <h2>Pet</h2>
+          <p class="muted">The small creature at the bottom of the sidebar.</p>
+        </div>
+        <div class="fields">
+          <label class="switch-row">
+            <input type="checkbox" checked={$petEnabled} onchange={(e) => petEnabled.set(e.currentTarget.checked)} />
+            <span class="track"><span class="knob"></span></span>
+            <span class="switch-text">
+              <span class="switch-title">Show pet</span>
+              <span class="help">It reacts to your deadlines and sync. Saved on this machine only.</span>
+            </span>
+          </label>
+
+          <label class="field narrow">
+            <span class="lbl">Name</span>
+            <input
+              class="input"
+              type="text"
+              maxlength="18"
+              placeholder="Nibble"
+              value={$petName}
+              disabled={!$petEnabled}
+              oninput={(e) => petName.set(e.currentTarget.value)}
+              onblur={(e) => petName.set(e.currentTarget.value.trim() || 'Nibble')}
+              spellcheck="false"
+            />
+            <span class="help">Used in a few of its remarks.</span>
           </label>
         </div>
       </section>

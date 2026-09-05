@@ -13,6 +13,7 @@
     theme,
     wireEvents,
   } from './lib/stores';
+  import { initPet } from './lib/pet';
   import Announcements from './lib/views/Announcements.svelte';
   import Deadlines from './lib/views/Deadlines.svelte';
   import Files from './lib/views/Files.svelte';
@@ -33,8 +34,12 @@
 
   $effect(() => {
     const teardown = wireEvents();
+    const petTeardown = initPet();
     void loadAll();
-    return teardown;
+    return () => {
+      teardown();
+      petTeardown();
+    };
   });
 
   function onKeydown(e: KeyboardEvent) {

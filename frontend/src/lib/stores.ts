@@ -53,7 +53,23 @@ export function dismissToast(id: number) {
 
 // -------------------------------------------------------------------- theme
 
-export const theme = writable<'system' | 'light' | 'dark'>(lsGet('nussync.theme', 'system'));
+const THEME_KEY = 'nussync.theme';
+
+/**
+ * Whether the user has already picked a theme on this machine. Captured before
+ * `initTheme` subscribes (which writes the key back immediately), so it stays a
+ * truthful "has an explicit local choice" signal — `loadSettings` uses it to
+ * avoid clobbering that choice with the backend's default.
+ */
+const hasLocalTheme = (() => {
+  try {
+    return localStorage.getItem(THEME_KEY) !== null;
+  } catch {
+    return false;
+  }
+})();
+
+export const theme = writable<'system' | 'light' | 'dark'>(lsGet(THEME_KEY, 'system'));
 export const resolvedTheme = writable<'light' | 'dark'>('light');
 
 let mql: MediaQueryList | undefined;
@@ -68,13 +84,19 @@ function computeTheme() {
   }
 }
 
+let themeWired = false;
+
+/** Idempotent — safe to call from both the bootstrap and the root component. */
 export function initTheme() {
+  if (themeWired) return;
+  themeWired = true;
   if (typeof window !== 'undefined' && window.matchMedia) {
     mql = window.matchMedia('(prefers-color-scheme: dark)');
+    // `change` fires whenever the OS flips, so "system" tracks it live.
     mql.addEventListener('change', computeTheme);
   }
   theme.subscribe((t) => {
-    lsSet('nussync.theme', t);
+    lsSet(THEME_KEY, t);
     computeTheme();
   });
 }
@@ -148,7 +170,11 @@ export const loadSettings = () =>
   guard('Load settings', () => api.getSettings(), (v) => {
     if (!v) return;
     settings.set(v);
-    if (v.Theme === 'light' || v.Theme === 'dark' || v.Theme === 'system') theme.set(v.Theme);
+    // Only adopt the backend's theme when this machine has no explicit choice;
+    // otherwise a load would stomp the toggle the user just used.
+    if (!hasLocalTheme && (v.Theme === 'light' || v.Theme === 'dark' || v.Theme === 'system')) {
+      theme.set(v.Theme);
+    }
   });
 
 export async function loadAll() {
