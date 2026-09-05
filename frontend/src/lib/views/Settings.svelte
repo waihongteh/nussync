@@ -24,6 +24,72 @@
   let extInput = $state('');
   let ladderInput = $state('');
 
+  // ------------------------------------------------------------- papers
+
+  let keywordInput = $state('');
+  let categoryInput = $state('');
+  let showPaperToken = $state(false);
+  let paperTg = $state<TelegramStatus>({ Configured: false, ChatID: '', BotName: '@nuspapertracker_bot' });
+  let paperPairing = $state(false);
+  let paperTesting = $state(false);
+
+  const DIGEST_HOURS = Array.from({ length: 24 }, (_, h) => ({
+    v: h,
+    label: `${String(h).padStart(2, '0')}:00`,
+  }));
+
+  const PAPER_COMMANDS: Array<[string, string]> = [
+    ['/paper', 'Today\u2019s digest \u2014 new arXiv matches plus recommendations'],
+    ['/save <n>', 'Save the nth paper from the last digest into the library'],
+    ['/reading', 'What you are part-way through, with page progress'],
+    ['/help', 'The command list for the paper bot'],
+  ];
+
+  $effect(() => {
+    void api
+      .getPaperTelegramStatus()
+      .then((v) => v && (paperTg = v))
+      .catch(() => {});
+  });
+
+  function addChip(list: 'PaperKeywords' | 'PaperCategories', raw: string) {
+    if (!draft) return;
+    const v = raw.trim().replace(/,+$/, '');
+    if (!v) return;
+    const cur = draft[list] ?? [];
+    if (!cur.includes(v)) draft[list] = [...cur, v];
+  }
+
+  function removeChip(list: 'PaperKeywords' | 'PaperCategories', v: string) {
+    if (!draft) return;
+    draft[list] = (draft[list] ?? []).filter((x) => x !== v);
+  }
+
+  async function pairPaper() {
+    paperPairing = true;
+    try {
+      const chatID = await api.pairPaperTelegram();
+      paperTg = await api.getPaperTelegramStatus();
+      if (draft) draft.PaperTelegramChatID = chatID;
+      toast(`Paper bot paired with chat ${chatID}`, 'success');
+    } catch (err) {
+      toast(`Pairing failed: ${errMsg(err)}`, 'error');
+    } finally {
+      paperPairing = false;
+    }
+  }
+
+  async function sendPaperTest() {
+    paperTesting = true;
+    try {
+      await api.sendPaperTestTelegram();
+    } catch (err) {
+      toast(errMsg(err), 'error');
+    } finally {
+      paperTesting = false;
+    }
+  }
+
   // ------------------------------------------------------------- study
 
   const MODEL_KEY = 'nussync.study.model';
@@ -601,6 +667,154 @@
             </select>
             <span class="help">Used for new overviews, quizzes, asks and flashcards. Saved on this machine only.</span>
           </label>
+        </div>
+      </section>
+
+      <!-- ----------------------------------------------------------- Papers -->
+      <section class="card section">
+        <div class="section-head">
+          <h2>Papers</h2>
+          <p class="muted">Search topics, the daily digest, and the separate Telegram bot that delivers it.</p>
+        </div>
+        <div class="fields">
+          <div class="field">
+            <span class="lbl">Topics</span>
+            <div class="chips">
+              {#each draft.PaperKeywords ?? [] as k (k)}
+                <span class="chip accent removable">
+                  {k}
+                  <button class="chip-x" onclick={() => removeChip('PaperKeywords', k)} aria-label="Remove {k}" type="button">
+                    <Icon name="x" size={10} />
+                  </button>
+                </span>
+              {/each}
+              <input
+                class="chip-input"
+                type="text"
+                placeholder="add a topic"
+                bind:value={keywordInput}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    addChip('PaperKeywords', keywordInput);
+                    keywordInput = '';
+                  }
+                }}
+                onblur={() => {
+                  addChip('PaperKeywords', keywordInput);
+                  keywordInput = '';
+                }}
+                spellcheck="false"
+              />
+            </div>
+            <span class="help">Matched against new arXiv titles and abstracts for the digest.</span>
+          </div>
+
+          <div class="field">
+            <span class="lbl">arXiv categories</span>
+            <div class="chips">
+              {#each draft.PaperCategories ?? [] as c (c)}
+                <span class="chip removable">
+                  {c}
+                  <button class="chip-x" onclick={() => removeChip('PaperCategories', c)} aria-label="Remove {c}" type="button">
+                    <Icon name="x" size={10} />
+                  </button>
+                </span>
+              {/each}
+              <input
+                class="chip-input"
+                type="text"
+                placeholder="add cs.CL"
+                bind:value={categoryInput}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    addChip('PaperCategories', categoryInput);
+                    categoryInput = '';
+                  }
+                }}
+                onblur={() => {
+                  addChip('PaperCategories', categoryInput);
+                  categoryInput = '';
+                }}
+                spellcheck="false"
+              />
+            </div>
+          </div>
+
+          <label class="field narrow">
+            <span class="lbl">Digest hour</span>
+            <select class="select" bind:value={draft.PaperDigestHour}>
+              {#each DIGEST_HOURS as h (h.v)}
+                <option value={h.v}>{h.label}</option>
+              {/each}
+            </select>
+            <span class="help">Local time the paper-of-the-day message goes out.</span>
+          </label>
+
+          <label class="switch-row">
+            <input type="checkbox" bind:checked={draft.NotifyPapers} />
+            <span class="track"><span class="knob"></span></span>
+            <span class="switch-text">
+              <span class="switch-title">Daily paper digest</span>
+              <span class="help">New arXiv matches plus a few recommendations, once a day.</span>
+            </span>
+          </label>
+
+          <label class="field">
+            <span class="lbl">Paper bot token</span>
+            <span class="with-btn">
+              <input
+                class="input"
+                type={showPaperToken ? 'text' : 'password'}
+                bind:value={draft.PaperTelegramToken}
+                placeholder="123456:ABC-DEF…"
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <button class="reveal" onclick={() => (showPaperToken = !showPaperToken)} aria-label="Toggle token visibility" type="button">
+                <Icon name={showPaperToken ? 'eyeOff' : 'eye'} size={14} />
+              </button>
+            </span>
+            <span class="help">A second bot, separate from the course bot — papers only.</span>
+          </label>
+
+          <div class="tg-card" class:paired={paperTg.Configured}>
+            <div class="tg-icon"><Icon name="book" size={16} /></div>
+            <div class="tg-body">
+              {#if paperTg.Configured}
+                <div class="tg-title">Paired with {paperTg.BotName || 'the paper bot'}</div>
+                <div class="tg-sub">Chat ID <span class="mono">{paperTg.ChatID}</span></div>
+              {:else}
+                <div class="tg-title">Paper bot not paired yet</div>
+                <div class="tg-sub">
+                  Send <span class="mono">/start</span> to <span class="mono">{paperTg.BotName || 'the paper bot'}</span>,
+                  then click Pair — NUSSync waits up to 60&nbsp;seconds for your message.
+                </div>
+              {/if}
+            </div>
+            <div class="tg-actions">
+              <button class="btn" onclick={pairPaper} disabled={paperPairing}>
+                {#if paperPairing}<span class="spinner"></span> Waiting…{:else}{paperTg.Configured ? 'Re-pair' : 'Pair'}{/if}
+              </button>
+              <button class="btn" onclick={sendPaperTest} disabled={!paperTg.Configured || paperTesting}>
+                {#if paperTesting}<span class="spinner"></span>{:else}<Icon name="send" size={13} />{/if}
+                Send test
+              </button>
+            </div>
+          </div>
+
+          <div class="field">
+            <span class="lbl">Paper bot commands</span>
+            <div class="cmd-card">
+              {#each PAPER_COMMANDS as [cmd, what] (cmd)}
+                <div class="cmd-row">
+                  <span class="mono cmd">{cmd}</span>
+                  <span class="cmd-what muted">{what}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
         </div>
       </section>
 

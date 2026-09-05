@@ -11,7 +11,7 @@
    */
   import { api, errMsg, on } from '../api';
   import Icon from '../components/Icon.svelte';
-  import { courses, courseByID, toast } from '../stores';
+  import { courses, courseByID, setContext, studyPreselect, toast } from '../stores';
   import type { AskResult, FileNode, Flashcard, Overview, Quiz, QuizAttempt, StudyJob, StudyStatus } from '../types';
   import { fileKind, fmtBytes, lsGet, lsSet, markdownToHTML, relTime } from '../util';
 
@@ -154,6 +154,23 @@
 
   $effect(() => {
     void loadStatus();
+  });
+
+  /**
+   * Papers hands over a file id through `studyPreselect` before navigating
+   * here. Consume it once — leaving it set would re-select on every mount.
+   */
+  $effect(() => {
+    const id = $studyPreselect;
+    if (!id) return;
+    studyPreselect.set(0);
+    if (!selectedIDs.includes(id)) selectedIDs = [id, ...selectedIDs];
+  });
+
+  // Keep the chat panel pointed at whatever Study is working on.
+  $effect(() => {
+    const f = primary;
+    if (f) setContext(f.ID, '', f.Name);
   });
 
   $effect(() => {

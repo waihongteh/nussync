@@ -15,6 +15,9 @@ import type {
   AppAPI,
   AppEvent,
   AskResult,
+  ChatMessage,
+  ChatSession,
+  CitationLink,
   Course,
   Deadline,
   FeedItem,
@@ -22,6 +25,11 @@ import type {
   Flashcard,
   Grade,
   Overview,
+  Paper,
+  PaperDigest,
+  PaperSearchResult,
+  PaperSummary,
+  LibraryPaper,
   Quiz,
   QuizAttempt,
   SearchHit,
@@ -122,6 +130,37 @@ export const api = {
   getStudyJobs: (): Promise<StudyJob[]> => call('GetStudyJobs'),
   cancelStudyJob: (id: string): Promise<void> => call('CancelStudyJob', id),
   getFilePageCount: (fileID: number): Promise<number> => call('GetFilePageCount', fileID),
+
+  // ---------------------------------------------------------------- papers
+  searchPapers: (query: string, source: string, limit: number): Promise<PaperSearchResult> =>
+    call('SearchPapers', query, source, limit),
+  getPaper: (id: string): Promise<Paper> => call('GetPaper', id),
+  addPaperToLibrary: (p: Paper): Promise<LibraryPaper> => call('AddPaperToLibrary', p),
+  removePaperFromLibrary: (id: string): Promise<void> => call('RemovePaperFromLibrary', id),
+  getLibrary: (status: string): Promise<LibraryPaper[]> => call('GetLibrary', status),
+  updateLibraryPaper: (lp: LibraryPaper): Promise<LibraryPaper> => call('UpdateLibraryPaper', lp),
+  downloadPaperPDF: (id: string): Promise<LibraryPaper> => call('DownloadPaperPDF', id),
+  getCitations: (id: string, limit: number): Promise<CitationLink[]> => call('GetCitations', id, limit),
+  getReferences: (id: string, limit: number): Promise<CitationLink[]> => call('GetReferences', id, limit),
+  getRecommendations: (limit: number): Promise<Paper[]> => call('GetRecommendations', limit),
+  getPaperDigest: (date: string): Promise<PaperDigest> => call('GetPaperDigest', date),
+  sendPaperDigestNow: (): Promise<void> => call('SendPaperDigestNow'),
+  exportBibTeX: (ids: string[]): Promise<string> => call('ExportBibTeX', ids),
+  openScholar: (query: string): Promise<void> => call('OpenScholar', query),
+  startPaperSummary: (paperID: string, model: string): Promise<string> =>
+    call('StartPaperSummary', paperID, model),
+  getPaperSummary: (paperID: string): Promise<PaperSummary> => call('GetPaperSummary', paperID),
+  pairPaperTelegram: (): Promise<string> => call('PairPaperTelegram'),
+  getPaperTelegramStatus: (): Promise<TelegramStatus> => call('GetPaperTelegramStatus'),
+  sendPaperTestTelegram: (): Promise<void> => call('SendPaperTestTelegram'),
+
+  // ------------------------------------------------------------------ chat
+  startChat: (fileID: number, paperID: string, model: string): Promise<ChatSession> =>
+    call('StartChat', fileID, paperID, model),
+  sendChat: (sessionID: string, message: string): Promise<string> => call('SendChat', sessionID, message),
+  getChats: (fileID: number, paperID: string): Promise<ChatSession[]> => call('GetChats', fileID, paperID),
+  getChatMessages: (sessionID: string): Promise<ChatMessage[]> => call('GetChatMessages', sessionID),
+  deleteChat: (sessionID: string): Promise<void> => call('DeleteChat', sessionID),
 };
 
 /**

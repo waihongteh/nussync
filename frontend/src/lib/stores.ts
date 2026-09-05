@@ -28,6 +28,7 @@ export const ROUTES = [
   'announcements',
   'grades',
   'study',
+  'papers',
   'arcade',
   'settings',
 ] as const;
@@ -153,6 +154,48 @@ export const selectedCourseID = writable<number>(0);
 
 /** Command palette visibility. */
 export const paletteOpen = writable(false);
+
+// -------------------------------------------------------- chat / context
+
+/**
+ * What the Claude chat panel should treat as context. Set by Files (selected
+ * file), Study (primary selection) and Papers (selected paper). Either id may
+ * be zero/empty — "no context" is a valid state and chat still works.
+ */
+export interface ChatContext {
+  fileID: number;
+  paperID: string;
+  name: string;
+}
+
+export const currentContext = writable<ChatContext>({ fileID: 0, paperID: '', name: '' });
+
+export function setContext(fileID: number, paperID: string, name: string) {
+  currentContext.set({ fileID, paperID, name });
+}
+
+/** Right-side chat panel visibility (Ctrl+J, top-bar button, Esc to close). */
+export const chatOpen = writable(false);
+
+/** Open the panel on a specific context in one step. */
+export function openChat(ctx?: Partial<ChatContext>) {
+  if (ctx) {
+    currentContext.set({ fileID: ctx.fileID ?? 0, paperID: ctx.paperID ?? '', name: ctx.name ?? '' });
+  }
+  chatOpen.set(true);
+}
+
+/**
+ * File id the Study view should preselect the next time it mounts. Papers sets
+ * it before navigating to `study`; Study consumes and clears it.
+ */
+export const studyPreselect = writable<number>(0);
+
+/** Jump to Study with a downloaded paper's file already selected. */
+export function studyFile(fileID: number) {
+  studyPreselect.set(fileID);
+  navigate('study');
+}
 
 /** Every file in the tree of the currently loaded course(s), flattened. */
 export const flatFiles = writable<FileNode[]>([]);

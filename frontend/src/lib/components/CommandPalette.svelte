@@ -52,6 +52,7 @@
     { label: 'Go to Announcements', icon: 'announcements', route: 'announcements' },
     { label: 'Go to Grades', icon: 'grades', route: 'grades' },
     { label: 'Go to Study', icon: 'layers', route: 'study' },
+    { label: 'Go to Papers', icon: 'book', route: 'papers' },
     { label: 'Go to Arcade', icon: 'gamepad', route: 'arcade' },
     { label: 'Go to Settings', icon: 'settings', route: 'settings' },
   ];

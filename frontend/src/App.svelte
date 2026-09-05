@@ -1,9 +1,11 @@
 <script lang="ts">
+  import ChatPanel from './lib/components/ChatPanel.svelte';
   import CommandPalette from './lib/components/CommandPalette.svelte';
   import Icon from './lib/components/Icon.svelte';
   import Sidebar from './lib/components/Sidebar.svelte';
   import Toasts from './lib/components/Toasts.svelte';
   import {
+    chatOpen,
     initTheme,
     loadAll,
     navigate,
@@ -20,6 +22,7 @@
   import Files from './lib/views/Files.svelte';
   import Grades from './lib/views/Grades.svelte';
   import Home from './lib/views/Home.svelte';
+  import Papers from './lib/views/Papers.svelte';
   import Settings from './lib/views/Settings.svelte';
   import Study from './lib/views/Study.svelte';
   import WhatsNew from './lib/views/WhatsNew.svelte';
@@ -32,6 +35,7 @@
     announcements: 'Announcements',
     grades: 'Grades',
     study: 'Study',
+    papers: 'Papers',
     arcade: 'Arcade',
     settings: 'Settings',
   };
@@ -55,6 +59,11 @@
       paletteOpen.update((v) => !v);
       return;
     }
+    if (mod && (e.key === 'j' || e.key === 'J')) {
+      e.preventDefault();
+      chatOpen.update((v) => !v);
+      return;
+    }
     if (mod && e.key === ',') {
       e.preventDefault();
       paletteOpen.set(false);
@@ -63,6 +72,7 @@
     }
     if (e.key === 'Escape') {
       paletteOpen.set(false);
+      chatOpen.set(false);
     }
   }
 
@@ -84,6 +94,15 @@
         <Icon name="search" size={13} />
         <span>Search</span>
         <kbd>Ctrl</kbd><kbd>K</kbd>
+      </button>
+      <button
+        class="icon-btn"
+        class:on={$chatOpen}
+        onclick={() => chatOpen.update((v) => !v)}
+        title="Chat with Claude (Ctrl+J)"
+        aria-label="Chat with Claude"
+      >
+        <Icon name="chat" size={14} />
       </button>
       <button class="icon-btn" onclick={cycleTheme} title="Theme: {$theme}" aria-label="Toggle theme">
         <Icon name={$theme === 'system' ? 'monitor' : $resolvedTheme === 'dark' ? 'moon' : 'sun'} size={14} />
@@ -108,6 +127,8 @@
         <WhatsNew />
       {:else if $route === 'study'}
         <Study />
+      {:else if $route === 'papers'}
+        <Papers />
       {:else if $route === 'arcade'}
         <Arcade />
       {:else if $route === 'settings'}
@@ -117,6 +138,7 @@
   </main>
 </div>
 
+<ChatPanel />
 <CommandPalette />
 <Toasts />
 
@@ -199,6 +221,11 @@
   .icon-btn:hover {
     background: var(--bg-hover);
     color: var(--text);
+  }
+
+  .icon-btn.on {
+    background: var(--bg-active);
+    color: var(--accent-text);
   }
 
   .content {

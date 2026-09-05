@@ -3,7 +3,7 @@
   import ContextMenu from '../components/ContextMenu.svelte';
   import FolderTree from '../components/FolderTree.svelte';
   import Icon from '../components/Icon.svelte';
-  import { courses, courseByID, flatFiles, openFileNode, selectedCourseID, toast } from '../stores';
+  import { courses, courseByID, flatFiles, openChat, openFileNode, selectedCourseID, setContext, toast } from '../stores';
   import type { FileNode, MenuItem, SearchHit } from '../types';
   import { debounce, fileKind, fmtBytes, lsGet, lsSet, relTime, snippetHTML } from '../util';
 
@@ -169,6 +169,12 @@
     void openFileNode(f);
   }
 
+  /** Selecting a file also makes it the chat panel's context. */
+  function select(f: FileNode) {
+    selectedFile = keyOf(f);
+    setContext(f.ID, '', f.Name);
+  }
+
   async function copyPath(f: FileNode) {
     try {
       await navigator.clipboard.writeText(f.Path);
@@ -180,7 +186,7 @@
 
   function openMenu(e: MouseEvent, f: FileNode) {
     e.preventDefault();
-    selectedFile = keyOf(f);
+    select(f);
     menu = {
       x: e.clientX,
       y: e.clientY,
@@ -193,6 +199,11 @@
           run: () => void api.revealFile(f.Path).catch((err) => toast(errMsg(err), 'error')),
         },
         { label: 'Copy path', icon: 'copy', run: () => void copyPath(f) },
+        {
+          label: 'Chat about this',
+          icon: 'chat',
+          run: () => openChat({ fileID: f.ID, paperID: '', name: f.Name }),
+        },
       ],
     };
   }
@@ -286,7 +297,7 @@
               <tr
                 class:sel={selectedFile === keyOf(f)}
                 class:unsynced={!f.Synced}
-                onclick={() => (selectedFile = keyOf(f))}
+                onclick={() => select(f)}
                 ondblclick={() => activate(f)}
                 oncontextmenu={(e) => openMenu(e, f)}
               >

@@ -14,6 +14,7 @@
     { id: 'announcements', label: 'Announcements', icon: 'announcements' },
     { id: 'grades', label: 'Grades', icon: 'grades' },
     { id: 'study', label: 'Study', icon: 'layers' },
+    { id: 'papers', label: 'Papers', icon: 'book' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
     { id: 'arcade', label: 'Play', icon: 'gamepad' },
   ];

@@ -126,6 +126,20 @@ export interface Settings {
   Hotkey: string;
   /** "system" | "light" | "dark" */
   Theme: 'system' | 'light' | 'dark' | string;
+
+  // ------------------------------------------------------------- papers
+  /** Topics the digest and recommendations track. */
+  PaperKeywords: string[];
+  /** arXiv categories, e.g. ["cs.CL","cs.LG","cs.AI"]. */
+  PaperCategories: string[];
+  /** Local hour (0-23) the daily paper digest is sent. */
+  PaperDigestHour: number;
+  /** Send the daily paper digest at all. */
+  NotifyPapers: boolean;
+  /** Token of the SEPARATE Telegram bot dedicated to papers. */
+  PaperTelegramToken: string;
+  /** Chat ID paired with the paper bot. */
+  PaperTelegramChatID: string;
 }
 
 export type SyncPhase = 'idle' | 'listing' | 'downloading' | 'indexing' | 'error';
@@ -186,7 +200,7 @@ export interface StudyStatus {
   Models: string[] | null;
 }
 
-export type StudyKind = 'overview' | 'quiz' | 'ask' | 'flashcards';
+export type StudyKind = 'overview' | 'quiz' | 'ask' | 'flashcards' | 'paper_summary' | 'chat';
 export type StudyJobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
 
 export interface StudyJob {
@@ -266,6 +280,118 @@ export interface StudyProgress {
   Text: string;
 }
 
+// ------------------------------------------------------------------ papers
+
+export type PaperSource = 'all' | 'arxiv' | 's2';
+export type PaperStatus = 'toread' | 'reading' | 'done';
+
+export interface Paper {
+  /** "arxiv:2401.01234" | "s2:<hash>" */
+  ID: string;
+  ArxivID: string;
+  S2ID: string;
+  DOI: string;
+  Title: string;
+  Authors: string[] | null;
+  Year: number;
+  Venue: string;
+  Abstract: string;
+  /** Semantic Scholar one-liner; "" when unavailable */
+  TLDR: string;
+  CitationCount: number;
+  URL: string;
+  PDFURL: string;
+  /** RFC3339 */
+  PublishedAt: string;
+  /** "arxiv" | "s2" */
+  Source: string;
+}
+
+export interface LibraryPaper extends Paper {
+  Status: PaperStatus | string;
+  Page: number;
+  Pages: number;
+  /** 0-5 */
+  Stars: number;
+  Tags: string[] | null;
+  Notes: string;
+  KeyIdea: string;
+  /** absolute path of the downloaded PDF, "" when not downloaded */
+  LocalPath: string;
+  /** RFC3339 */
+  AddedAt: string;
+  UpdatedAt: string;
+  ReadAt: string;
+  /** row id in `files` once the PDF is downloaded and indexed; 0 otherwise */
+  FileID: number;
+}
+
+export interface PaperSearchResult {
+  Papers: Paper[] | null;
+  Total: number;
+}
+
+/** Go embeds Paper, so its fields are flattened into this object. */
+export interface CitationLink extends Paper {
+  InLibrary: boolean;
+  /** "" when the paper is not in the library */
+  Status: PaperStatus | string;
+}
+
+export interface PaperDigest {
+  /** YYYY-MM-DD */
+  Date: string;
+  Papers: Paper[] | null;
+  /** one reason per paper, same order */
+  Reason: string[] | null;
+}
+
+export interface PaperSummary {
+  PaperID: string;
+  /** markdown */
+  Markdown: string;
+  CreatedAt: string;
+  Model: string;
+}
+
+// -------------------------------------------------------------------- chat
+
+export interface ChatSession {
+  ID: string;
+  /** 0 when the session is not about a Canvas file */
+  FileID: number;
+  /** "" when the session is not about a paper */
+  PaperID: string;
+  Title: string;
+  /** the Claude Code CLI session id used for --resume */
+  ClaudeSessionID: string;
+  Model: string;
+  CreatedAt: string;
+  UpdatedAt: string;
+}
+
+export interface ChatMessage {
+  ID: number;
+  SessionID: string;
+  /** "user" | "assistant" */
+  Role: string;
+  Text: string;
+  CreatedAt: string;
+}
+
+/** `chat:delta` payload */
+export interface ChatDelta {
+  SessionID: string;
+  Text: string;
+}
+
+/** `chat:done` payload */
+export interface ChatDone {
+  SessionID: string;
+  JobID: string;
+  Error: string;
+}
+
 export interface ToastPayload {
   /** info | success | error */
   Level: 'info' | 'success' | 'error' | string;
@@ -281,7 +407,10 @@ export type AppEvent =
   | 'toast'
   | 'feed:updated'
   | 'study:job'
-  | 'study:progress';
+  | 'study:progress'
+  | 'papers:updated'
+  | 'chat:delta'
+  | 'chat:done';
 
 /** Typed shape of the bound Go App methods. */
 export interface AppAPI {
@@ -340,6 +469,34 @@ export interface AppAPI {
   GetStudyJobs(): Promise<StudyJob[]>;
   CancelStudyJob(id: string): Promise<void>;
   GetFilePageCount(fileID: number): Promise<number>;
+
+  // ------------------------------------------------------------- papers
+  SearchPapers(query: string, source: string, limit: number): Promise<PaperSearchResult>;
+  GetPaper(id: string): Promise<Paper>;
+  AddPaperToLibrary(p: Paper): Promise<LibraryPaper>;
+  RemovePaperFromLibrary(id: string): Promise<void>;
+  GetLibrary(status: string): Promise<LibraryPaper[]>;
+  UpdateLibraryPaper(lp: LibraryPaper): Promise<LibraryPaper>;
+  DownloadPaperPDF(id: string): Promise<LibraryPaper>;
+  GetCitations(id: string, limit: number): Promise<CitationLink[]>;
+  GetReferences(id: string, limit: number): Promise<CitationLink[]>;
+  GetRecommendations(limit: number): Promise<Paper[]>;
+  GetPaperDigest(date: string): Promise<PaperDigest>;
+  SendPaperDigestNow(): Promise<void>;
+  ExportBibTeX(ids: string[]): Promise<string>;
+  OpenScholar(query: string): Promise<void>;
+  StartPaperSummary(paperID: string, model: string): Promise<string>;
+  GetPaperSummary(paperID: string): Promise<PaperSummary>;
+  PairPaperTelegram(): Promise<string>;
+  GetPaperTelegramStatus(): Promise<TelegramStatus>;
+  SendPaperTestTelegram(): Promise<void>;
+
+  // --------------------------------------------------------------- chat
+  StartChat(fileID: number, paperID: string, model: string): Promise<ChatSession>;
+  SendChat(sessionID: string, message: string): Promise<string>;
+  GetChats(fileID: number, paperID: string): Promise<ChatSession[]>;
+  GetChatMessages(sessionID: string): Promise<ChatMessage[]>;
+  DeleteChat(sessionID: string): Promise<void>;
 }
 
 // ------------------------------------------------------------------ UI-only

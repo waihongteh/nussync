@@ -9,13 +9,20 @@ import type {
   Announcement,
   AppAPI,
   AskResult,
+  ChatMessage,
+  ChatSession,
+  CitationLink,
   Course,
   Deadline,
   FeedItem,
   FileNode,
   Flashcard,
   Grade,
+  LibraryPaper,
   Overview,
+  Paper,
+  PaperDigest,
+  PaperSummary,
   Question,
   Quiz,
   QuizAttempt,
@@ -568,6 +575,19 @@ let settings: Settings = {
   LaunchAtLogin: false,
   Hotkey: 'ctrl+shift+n',
   Theme: 'system',
+  PaperKeywords: [
+    'machine unlearning',
+    'LLM unlearning',
+    'knowledge editing',
+    'model editing',
+    'knowledge unlearning',
+    'memorization',
+  ],
+  PaperCategories: ['cs.CL', 'cs.LG', 'cs.AI'],
+  PaperDigestHour: 9,
+  NotifyPapers: true,
+  PaperTelegramToken: '',
+  PaperTelegramChatID: '',
 };
 
 let telegram: TelegramStatus = { Configured: false, ChatID: '', BotName: '@nuscanvassync_bot' };
@@ -1322,6 +1342,694 @@ function normaliseMCQ(given: string, q: Question): string {
   }
 })();
 
+// ----------------------------------------------------------------- papers
+
+/** Compact seed shape; the full Paper is expanded by `mkPaper`. */
+interface PaperSeed {
+  id: string;
+  title: string;
+  authors: string[];
+  year: number;
+  venue: string;
+  tldr: string;
+  abstract: string;
+  cites: number;
+  arxiv?: string;
+}
+
+function mkPaper(p: PaperSeed): Paper {
+  const arxiv = p.arxiv ?? (p.id.startsWith('arxiv:') ? p.id.slice(6) : '');
+  const s2 = p.id.startsWith('s2:') ? p.id.slice(3) : '';
+  return {
+    ID: p.id,
+    ArxivID: arxiv,
+    S2ID: s2,
+    DOI: s2 ? `10.18653/v1/${p.year}.acl-long.${(p.cites % 700) + 1}` : '',
+    Title: p.title,
+    Authors: [...p.authors],
+    Year: p.year,
+    Venue: p.venue,
+    Abstract: p.abstract,
+    TLDR: p.tldr,
+    CitationCount: p.cites,
+    URL: arxiv ? `https://arxiv.org/abs/${arxiv}` : `https://www.semanticscholar.org/paper/${s2}`,
+    PDFURL: arxiv ? `https://arxiv.org/pdf/${arxiv}` : '',
+    PublishedAt: `${p.year}-${String(((p.cites % 12) + 1)).padStart(2, '0')}-14T00:00:00Z`,
+    Source: arxiv ? 'arxiv' : 's2',
+  };
+}
+
+const PAPER_SEEDS: PaperSeed[] = [
+  {
+    id: 'arxiv:2310.02238',
+    title: "Who's Harry Potter? Approximate Unlearning in LLMs",
+    authors: ['Ronen Eldan', 'Mark Russinovich'],
+    year: 2023,
+    venue: 'arXiv preprint',
+    cites: 412,
+    tldr: 'Fine-tunes a reinforced model to spot memorised tokens, then relabels them with generic continuations — Llama-2-7b forgets the Potter corpus in about a GPU hour with benchmarks intact.',
+    abstract:
+      'Large language models are trained on massive internet corpora that often contain copyrighted content. We propose a technique for unlearning a subset of the training data from a LLM, without having to retrain it from scratch. Our approach combines a reinforced model that identifies tokens most related to the unlearning target, replacing idiosyncratic expressions with generic counterparts, and fine-tuning on these alternative labels. We evaluate on the Harry Potter books and show the model can no longer generate or recall content while its performance on common benchmarks is nearly unaffected.',
+  },
+  {
+    id: 'arxiv:2401.06121',
+    title: 'TOFU: A Task of Fictitious Unlearning for LLMs',
+    authors: ['Pratyush Maini', 'Zhili Feng', 'Avi Schwarzschild', 'Zachary C. Lipton', 'J. Zico Kolter'],
+    year: 2024,
+    venue: 'COLM 2024',
+    cites: 358,
+    tldr: 'A synthetic benchmark of 200 fictitious author profiles where the ground-truth "retain" model is known, so forget quality and model utility can be measured against a real target.',
+    abstract:
+      'We present TOFU, a benchmark for unlearning in large language models built on synthetic author biographies that never appear in pretraining data. Because the fictitious corpus is entirely under our control, we can finetune a model on it and then ask for principled forgetting, comparing against a retain-model oracle. We define a forget quality metric based on a statistical test between unlearned and retain models, and show that existing unlearning algorithms are far from the gold standard.',
+  },
+  {
+    id: 'arxiv:2202.05262',
+    title: 'Locating and Editing Factual Associations in GPT',
+    authors: ['Kevin Meng', 'David Bau', 'Alex Andonian', 'Yonatan Belinkov'],
+    year: 2022,
+    venue: 'NeurIPS 2022',
+    cites: 1487,
+    tldr: 'Causal tracing localises factual recall in mid-layer MLPs; ROME then edits a single rank-one weight update to rewrite one fact.',
+    abstract:
+      'We analyze the storage and recall of factual associations in autoregressive transformer language models, finding evidence that these associations correspond to localized, directly-editable computations. We first develop a causal intervention for identifying neuron activations that are decisive in a model factual predictions. This reveals a distinct set of steps in middle-layer feed-forward modules that mediate factual predictions while processing subject tokens. To test our hypothesis we modify feedforward weights to update specific factual associations using Rank-One Model Editing (ROME).',
+  },
+  {
+    id: 'arxiv:2210.07229',
+    title: 'Mass-Editing Memory in a Transformer',
+    authors: ['Kevin Meng', 'Arnab Sen Sharma', 'Alex Andonian', 'Yonatan Belinkov', 'David Bau'],
+    year: 2022,
+    venue: 'ICLR 2023',
+    cites: 764,
+    tldr: 'MEMIT scales ROME from one edit to ten thousand by spreading the update across a range of MLP layers.',
+    abstract:
+      'Recent work has shown exciting promise in updating large language models with new memories, so as to replace obsolete information or add specialized knowledge. However, this line of work is predominantly limited to updating single associations. We develop MEMIT, a method for directly updating a language model with many memories, demonstrating experimentally that it can scale up to thousands of associations for GPT-J and GPT-NeoX, exceeding prior work by orders of magnitude.',
+  },
+  {
+    id: 's2:9f1c2b7a4d3e5a61c0b8d2f4e6a90b3c5d7e1f28',
+    title: 'Rethinking Machine Unlearning for Large Language Models',
+    authors: ['Sijia Liu', 'Yuanshun Yao', 'Jinghan Jia', 'Stephen Casper', 'Nathalie Baracaldo', 'Peter Hase'],
+    year: 2024,
+    venue: 'Nature Machine Intelligence',
+    cites: 246,
+    tldr: 'A position paper mapping the design space of LLM unlearning — targets, evaluation, and the gap between exact and approximate forgetting.',
+    abstract:
+      'We explore machine unlearning in the domain of large language models, referred to as LLM unlearning. This initiative aims to eliminate undesirable data influence (e.g., sensitive or illegal information) and the associated model capabilities, while maintaining the integrity of essential knowledge generation. We survey the conceptual formulation, methodologies, metrics and applications, and identify open problems including unlearning scope, data-model interaction, and robust evaluation.',
+  },
+  {
+    id: 'arxiv:2403.03218',
+    title: 'The WMDP Benchmark: Measuring and Reducing Malicious Use With Unlearning',
+    authors: ['Nathaniel Li', 'Alexander Pan', 'Anjali Gopal', 'Summer Yue', 'Daniel Berrios'],
+    year: 2024,
+    venue: 'ICML 2024',
+    cites: 305,
+    tldr: '3,668 proxy questions for hazardous bio/cyber knowledge plus RMU, an unlearning method that corrupts hazardous activations while leaving general ability alone.',
+    abstract:
+      'The White House executive order on AI highlights the risk of LLMs empowering malicious actors in biological, cyber and chemical weapons development. We publicly release the Weapons of Mass Destruction Proxy (WMDP) benchmark, a dataset of multiple-choice questions that serve as a proxy measurement of hazardous knowledge, and develop RMU, a state-of-the-art unlearning method based on controlling model representations.',
+  },
+  {
+    id: 'arxiv:2309.17410',
+    title: 'Editing Large Language Models: Problems, Methods, and Opportunities',
+    authors: ['Yunzhi Yao', 'Peng Wang', 'Bozhong Tian', 'Siyuan Cheng', 'Zhoubo Li', 'Ningyu Zhang'],
+    year: 2023,
+    venue: 'EMNLP 2023',
+    cites: 592,
+    tldr: 'An empirical comparison of knowledge-editing families under one protocol, with a portability and locality analysis that most single-edit papers skip.',
+    abstract:
+      'Despite the ability to train capable LLMs, the methodology for maintaining their relevancy and rectifying errors remains elusive. Recently model editing has emerged as a promising avenue. We provide an exhaustive overview of the task, a standardised empirical comparison of representative approaches, and a new benchmark that stresses the portability of an edit to logically entailed facts.',
+  },
+  {
+    id: 'arxiv:2406.09179',
+    title: 'Large Language Model Unlearning via Embedding-Corrupted Prompts',
+    authors: ['Chris Yuhao Liu', 'Yaxuan Wang', 'Jeffrey Flanigan', 'Yang Liu'],
+    year: 2024,
+    venue: 'NeurIPS 2024',
+    cites: 71,
+    tldr: 'Skips weight updates entirely: a small prompt classifier routes forget-set queries through a corrupted embedding, giving near-zero side effects on retained tasks.',
+    abstract:
+      'Large language models have advanced to encompass extensive knowledge across diverse domains. Yet controlling what should not be known in a LLM is important for ensuring safe and aligned use. We present Embedding-COrrupted (ECO) Prompts, a lightweight unlearning framework that enforces an unlearned state at inference time through a prompt classifier and zeroth-order optimised corruption, avoiding costly retraining while scaling to models of 236B parameters.',
+  },
+];
+
+const PAPERS: Paper[] = PAPER_SEEDS.map(mkPaper);
+
+const EXTRA_SEEDS: PaperSeed[] = [
+  {
+    id: 'arxiv:2308.07269',
+    title: 'EasyEdit: An Easy-to-use Knowledge Editing Framework for LLMs',
+    authors: ['Peng Wang', 'Ningyu Zhang', 'Bozhong Tian', 'Zekun Xi', 'Yunzhi Yao'],
+    year: 2023,
+    venue: 'ACL 2024 Demo',
+    cites: 231,
+    tldr: 'One interface over ROME, MEMIT, IKE and friends, with reliability / generalisation / locality reported the same way for each.',
+    abstract:
+      'Large Language Models usually suffer from knowledge cutoff or fallacy issues. Knowledge editing has emerged as a promising paradigm. However, existing methods differ in implementation, making comparison hard. We propose EasyEdit, an easy-to-use knowledge editing framework which supports various cutting-edge knowledge editing approaches and can be readily applied to many LLMs.',
+  },
+  {
+    id: 'arxiv:2402.16835',
+    title: 'Eight Methods to Evaluate Robust Unlearning in LLMs',
+    authors: ['Aengus Lynch', 'Phillip Guo', 'Aidan Ewart', 'Stephen Casper', 'Dylan Hadfield-Menell'],
+    year: 2024,
+    venue: 'arXiv preprint',
+    cites: 158,
+    tldr: 'Shows that "forgotten" knowledge in the Harry Potter model is recoverable by in-context relearning, so forget-set accuracy alone is not evidence of unlearning.',
+    abstract:
+      'Machine unlearning can be useful for removing harmful capabilities and memorized text from large language models, but there are not yet standardized methods for rigorously evaluating it. We survey and critique the unlearning evaluation literature, and apply eight complementary evaluations to a case study of unlearning the Harry Potter books, finding residual knowledge under adversarial probing.',
+  },
+  {
+    id: 's2:3a5c8e2f7b1d4906c8a2e4b6d0f8a1c3e5b7d902',
+    title: 'Do Unlearning Methods Remove Information from Language Model Weights?',
+    authors: ['Aghyad Deeb', 'Fabien Roger'],
+    year: 2024,
+    venue: 'ICLR 2025',
+    cites: 44,
+    tldr: 'Finetuning on a handful of forget-set facts restores most of the "removed" accuracy — evidence that current methods suppress rather than delete.',
+    abstract:
+      'We propose an adversarial evaluation method to test whether unlearning removes information from model weights: finetuning on a subset of the facts that were meant to be unlearned and measuring recovery on the held-out remainder. Applying it to state-of-the-art unlearning methods, we find that 88% of pre-unlearning accuracy is recovered, suggesting that the information remains present in the weights.',
+  },
+];
+
+const EXTRA_PAPERS: Paper[] = EXTRA_SEEDS.map(mkPaper);
+const ALL_PAPERS: Paper[] = [...PAPERS, ...EXTRA_PAPERS];
+
+const paperByID = (id: string) => ALL_PAPERS.find((p) => p.ID === id);
+
+/** Five library entries spread across the three statuses. */
+function mkLibrary(
+  p: Paper,
+  status: string,
+  page: number,
+  pages: number,
+  stars: number,
+  tags: string[],
+  notes: string,
+  keyIdea: string,
+  addedDaysAgo: number,
+  fileID = 0,
+): LibraryPaper {
+  return {
+    ...p,
+    Status: status,
+    Page: page,
+    Pages: pages,
+    Stars: stars,
+    Tags: [...tags],
+    Notes: notes,
+    KeyIdea: keyIdea,
+    LocalPath: fileID ? `${SYNC_ROOT}\\Papers\\${p.Year} - ${(p.Authors ?? [''])[0].split(' ').pop()} - ${p.Title.slice(0, 40)}.pdf` : '',
+    AddedAt: iso(-addedDaysAgo * DAY),
+    UpdatedAt: iso(-Math.max(1, addedDaysAgo - 1) * DAY),
+    ReadAt: status === 'done' ? iso(-Math.max(1, addedDaysAgo - 2) * DAY) : '',
+    FileID: fileID,
+  };
+}
+
+const LIBRARY: LibraryPaper[] = [
+  mkLibrary(
+    PAPERS[1],
+    'reading',
+    9,
+    24,
+    4,
+    ['benchmark', 'fyp-core'],
+    'The forget-quality metric is a KS test between the unlearned model and a retain oracle. Worth stealing for the FYP evaluation — but only works because the corpus is synthetic.',
+    'Fictitious authors make the retain oracle computable, which is the whole trick.',
+    12,
+    2001,
+  ),
+  mkLibrary(
+    PAPERS[2],
+    'done',
+    18,
+    18,
+    5,
+    ['method', 'locality', 'must-cite'],
+    'Causal tracing is the part I actually need: it gives a principled place to intervene rather than editing everything. Check whether the mid-layer MLP story survives on newer instruction-tuned models.',
+    'Facts live in mid-layer MLPs and a rank-one update rewrites one.',
+    31,
+    2002,
+  ),
+  mkLibrary(
+    PAPERS[5],
+    'reading',
+    4,
+    31,
+    4,
+    ['benchmark', 'safety'],
+    'RMU corrupts activations on hazardous topics. Their retain-set choice matters a lot — ablation in appendix C.',
+    'Unlearning framed as a safety intervention, with a proxy benchmark to measure it.',
+    6,
+    0,
+  ),
+  mkLibrary(
+    PAPERS[0],
+    'toread',
+    0,
+    14,
+    3,
+    ['classic'],
+    '',
+    '',
+    3,
+    0,
+  ),
+  mkLibrary(
+    PAPERS[4],
+    'toread',
+    0,
+    0,
+    0,
+    ['survey'],
+    '',
+    '',
+    1,
+    0,
+  ),
+];
+
+const PAPER_SUMMARIES = new Map<string, PaperSummary>();
+
+PAPER_SUMMARIES.set(PAPERS[2].ID, {
+  PaperID: PAPERS[2].ID,
+  Model: 'sonnet',
+  CreatedAt: iso(-2 * DAY),
+  Markdown: [
+    '## Contribution',
+    'Shows that factual recall in autoregressive transformers is **localised** — a causal tracing procedure',
+    'pins the decisive computation to mid-layer MLP modules at the last subject token — and turns that',
+    'finding into ROME, a closed-form rank-one edit of a single MLP weight matrix.',
+    '',
+    '## Method',
+    '- *Causal tracing*: corrupt the subject token embeddings, then restore one hidden state at a time and',
+    '  measure how much of the correct-fact probability comes back.',
+    '- *ROME*: treat the second MLP layer as a linear associative memory and solve for the minimal rank-one',
+    '  update that maps a new key to a new value under a constraint that preserves other keys.',
+    '',
+    '## Key results',
+    '- Restoring mid-layer MLP states at the subject token recovers **~80%** of the corrupted probability.',
+    '- ROME reaches 100% efficacy and ~96% paraphrase generalisation on zsRE.',
+    '- On the harder CounterFact set it beats fine-tuning on the specificity/generalisation trade-off.',
+    '',
+    '## Limitations',
+    '- One edit at a time; sequential edits degrade the model (this is what MEMIT later fixes).',
+    '- Evaluated on GPT-2 XL and GPT-J — no instruction-tuned or RLHF model in the paper.',
+    '- Efficacy metrics are prompt-based, so an edit can pass while the old fact survives under paraphrase.',
+    '',
+    '## Relevance to LLM unlearning & knowledge editing',
+    'This is the localisation argument the whole editing literature is built on, and the natural baseline for',
+    'any "delete this fact" claim in the FYP. If unlearning is really editing-to-null, ROME is the ablation to',
+    'run first — and the failure modes reported later (locality collapse under many edits) are the ones to',
+    'measure.',
+    '',
+    '## One-line takeaway',
+    'Facts are stored in mid-layer MLPs as key-value associations, and one rank-one update rewrites one.',
+    '',
+    '## Related work worth reading',
+    '- MEMIT (Meng et al., 2022) — the same edit scaled to thousands.',
+    '- "Does Localization Inform Editing?" (Hase et al., 2023) — argues localisation and editability come apart.',
+  ].join('\n'),
+});
+
+const paperTimers = new Map<string, Array<ReturnType<typeof setTimeout>>>();
+
+/** Fake ~4s paper-summary job, emitted on the shared `study:job` channel. */
+function startPaperSummaryJob(paperID: string, model: string): string {
+  const id = `job-${++jobSeq}`;
+  const job: StudyJob = {
+    ID: id,
+    Kind: 'paper_summary',
+    FileIDs: [],
+    Status: 'queued',
+    Progress: 'Queued',
+    Error: '',
+    StartedAt: new Date().toISOString(),
+    FinishedAt: '',
+    Model: model || 'sonnet',
+    CostUSD: 0,
+  };
+  JOBS.unshift(job);
+  const timers: Array<ReturnType<typeof setTimeout>> = [];
+  paperTimers.set(id, timers);
+  const at = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
+  emitJob(job);
+
+  const lines = [
+    'Downloading the PDF…',
+    'Reading the paper…',
+    'Extracting method and results…',
+    'Writing the key points…',
+  ];
+  at(150, () => {
+    job.Status = 'running';
+    job.Progress = lines[0];
+    emitJob(job);
+    localEmitter.emit('study:progress', { JobID: id, Text: lines[0] });
+  });
+  lines.slice(1).forEach((line, i) => {
+    at(800 + i * 950, () => {
+      job.Progress = line;
+      emitJob(job);
+      localEmitter.emit('study:progress', { JobID: id, Text: line });
+    });
+  });
+  at(4000, () => {
+    const p = paperByID(paperID);
+    PAPER_SUMMARIES.set(paperID, {
+      PaperID: paperID,
+      Model: job.Model,
+      CreatedAt: new Date().toISOString(),
+      Markdown: makePaperSummary(p),
+    });
+    job.Status = 'done';
+    job.Progress = 'Done';
+    job.FinishedAt = new Date().toISOString();
+    job.CostUSD = Math.round((0.03 + Math.random() * 0.07) * 1000) / 1000;
+    emitJob(job);
+    localEmitter.emit('toast', { Level: 'success', Message: `Key points ready — ${p?.Title.slice(0, 46) ?? 'paper'}…` });
+    localEmitter.emit('papers:updated');
+    paperTimers.delete(id);
+  });
+  return id;
+}
+
+function makePaperSummary(p: Paper | undefined): string {
+  const title = p?.Title ?? 'this paper';
+  const first = (p?.Authors ?? ['the authors'])[0];
+  return [
+    '## Contribution',
+    `${title} (${first} et al., ${p?.Year ?? '—'}) ${p?.TLDR ?? ''}`,
+    '',
+    '## Method',
+    '- The setup is described in section 3; the training objective combines a forget term with a retain term.',
+    '- Hyperparameters are swept over three seeds; the retain set is drawn from the same distribution.',
+    '',
+    '## Key results',
+    `- Reported on ${p?.Venue || 'the paper benchmark'}: forget accuracy drops to near chance while MMLU moves by <1 point.`,
+    '- Ablating the retain term costs roughly 6 points of general utility.',
+    '',
+    '## Limitations',
+    '- Evaluation is prompt-based, so suppressed knowledge may still be recoverable by finetuning.',
+    '- Only 7B-scale models are tested end to end.',
+    '',
+    '## Relevance to LLM unlearning & knowledge editing',
+    'Sits directly on the FYP line of work: the forget/retain trade-off here is the same one the project has to',
+    'measure, and the evaluation protocol is reusable with a different forget set.',
+    '',
+    '## One-line takeaway',
+    p?.TLDR || 'A practical forget/retain trade-off with an evaluation protocol worth reusing.',
+    '',
+    '## Related work worth reading',
+    '- TOFU (Maini et al., 2024) — the retain-oracle benchmark.',
+    '- ROME / MEMIT — the editing side of the same coin.',
+  ].join('\n');
+}
+
+/** Citation and reference edges, keyed by paper id. */
+function citationLinks(ids: string[]): CitationLink[] {
+  return ids
+    .map((id) => paperByID(id))
+    .filter(Boolean)
+    .map((p) => {
+      const lp = LIBRARY.find((x) => x.ID === p!.ID);
+      return { ...p!, Authors: [...(p!.Authors ?? [])], InLibrary: !!lp, Status: lp?.Status ?? '' };
+    });
+}
+
+const CITATIONS: Record<string, string[]> = {
+  'arxiv:2202.05262': ['arxiv:2210.07229', 'arxiv:2309.17410', 'arxiv:2308.07269', 'arxiv:2401.06121'],
+  'arxiv:2401.06121': ['arxiv:2402.16835', 's2:3a5c8e2f7b1d4906c8a2e4b6d0f8a1c3e5b7d902', 'arxiv:2406.09179'],
+  'arxiv:2403.03218': ['arxiv:2402.16835', 's2:9f1c2b7a4d3e5a61c0b8d2f4e6a90b3c5d7e1f28'],
+  'arxiv:2310.02238': ['arxiv:2402.16835', 'arxiv:2401.06121', 's2:9f1c2b7a4d3e5a61c0b8d2f4e6a90b3c5d7e1f28'],
+};
+
+const REFERENCES: Record<string, string[]> = {
+  'arxiv:2202.05262': ['arxiv:2309.17410'],
+  'arxiv:2401.06121': ['arxiv:2310.02238', 'arxiv:2202.05262'],
+  'arxiv:2403.03218': ['arxiv:2310.02238', 'arxiv:2401.06121', 'arxiv:2202.05262'],
+  'arxiv:2310.02238': ['arxiv:2202.05262'],
+  's2:9f1c2b7a4d3e5a61c0b8d2f4e6a90b3c5d7e1f28': ['arxiv:2310.02238', 'arxiv:2401.06121', 'arxiv:2403.03218'],
+};
+
+let paperTelegram: TelegramStatus = { Configured: false, ChatID: '', BotName: '@nuspapertracker_bot' };
+
+function bibKey(p: Paper): string {
+  const last = (p.Authors ?? ['anon'])[0].split(/\s+/).pop() ?? 'anon';
+  const word = p.Title.split(/\s+/).find((w) => w.length > 4) ?? 'paper';
+  return `${last.toLowerCase()}${p.Year}${word.toLowerCase().replace(/[^a-z]/g, '')}`;
+}
+
+function toBibTeX(p: Paper): string {
+  const type = p.Source === 'arxiv' ? 'misc' : 'inproceedings';
+  const rows = [
+    `  title        = {${p.Title}},`,
+    `  author       = {${(p.Authors ?? []).join(' and ')}},`,
+    `  year         = {${p.Year}},`,
+  ];
+  if (p.Source === 'arxiv') {
+    rows.push(`  eprint       = {${p.ArxivID}},`, '  archivePrefix= {arXiv},', '  primaryClass = {cs.CL},');
+  } else {
+    rows.push(`  booktitle    = {${p.Venue}},`);
+    if (p.DOI) rows.push(`  doi          = {${p.DOI}},`);
+  }
+  rows.push(`  url          = {${p.URL}}`);
+  return `@${type}{${bibKey(p)},\n${rows.join('\n')}\n}`;
+}
+
+// ------------------------------------------------------------------- chat
+
+let chatSeq = 50;
+let chatMsgSeq = 950;
+
+const chatID = (n: number) => `chat-${n}`;
+
+const CHAT_SESSIONS: ChatSession[] = [
+  {
+    ID: chatID(41),
+    FileID: 0,
+    PaperID: 'arxiv:2401.06121',
+    Title: 'How is forget quality computed?',
+    ClaudeSessionID: 'c1f0e2a4-3b56-4c78-9d01-2e3f4a5b6c7d',
+    Model: 'sonnet',
+    CreatedAt: iso(-2 * DAY),
+    UpdatedAt: iso(-2 * DAY + 6 * 60_000),
+  },
+  {
+    ID: chatID(42),
+    FileID: 0,
+    PaperID: 'arxiv:2202.05262',
+    Title: 'Causal tracing vs attention rollout',
+    ClaudeSessionID: '77aa10bc-99de-42f1-8a3c-5b6d7e8f9012',
+    Model: 'sonnet',
+    CreatedAt: iso(-5 * DAY),
+    UpdatedAt: iso(-5 * DAY + 11 * 60_000),
+  },
+  {
+    ID: chatID(43),
+    FileID: 1001,
+    PaperID: '',
+    Title: 'Explain value iteration on slide 12',
+    ClaudeSessionID: '2b3c4d5e-6f70-4812-93a4-b5c6d7e8f901',
+    Model: 'sonnet',
+    CreatedAt: iso(-1 * DAY),
+    UpdatedAt: iso(-1 * DAY + 4 * 60_000),
+  },
+];
+
+const CHAT_MESSAGES: ChatMessage[] = [
+  {
+    ID: 901,
+    SessionID: chatID(41),
+    Role: 'user',
+    Text: 'How exactly is forget quality computed in TOFU?',
+    CreatedAt: iso(-2 * DAY),
+  },
+  {
+    ID: 902,
+    SessionID: chatID(41),
+    Role: 'assistant',
+    Text: [
+      'Forget quality is a **statistical test**, not an accuracy number (p. 5).',
+      '',
+      '1. For every question in the forget set, compute the model probability of the ground-truth answer,',
+      '   normalised by answer length.',
+      '2. Do the same for the *retain model* — the oracle finetuned only on the 95% that was never forgotten.',
+      '3. Run a two-sided Kolmogorov-Smirnov test between the two distributions.',
+      '',
+      'The reported forget quality is the **p-value**: a high p means the unlearned model is statistically',
+      'indistinguishable from the oracle, which is the actual goal. A model that simply refuses on every forget',
+      'question scores badly, because its distribution is nothing like the oracle either.',
+      '',
+      'The catch is that this only works when a retain oracle can be trained, which is why the corpus has to be',
+      'fictitious (p. 3).',
+    ].join('\n'),
+    CreatedAt: iso(-2 * DAY + 40_000),
+  },
+  {
+    ID: 903,
+    SessionID: chatID(41),
+    Role: 'user',
+    Text: 'Could I reuse that metric with a real (non-fictitious) forget set?',
+    CreatedAt: iso(-2 * DAY + 5 * 60_000),
+  },
+  {
+    ID: 904,
+    SessionID: chatID(41),
+    Role: 'assistant',
+    Text: [
+      'Only partly. The KS test itself is corpus-agnostic, but it needs the retain oracle, and for a real',
+      'pretraining corpus you cannot retrain the base model without the forget set — that is exactly the cost',
+      'unlearning exists to avoid.',
+      '',
+      'Two workable substitutes:',
+      '',
+      '- **Held-out proxy oracle**: finetune a smaller model twice (with and without the forget shard) and',
+      '  validate that your method ranks the same way at that scale, then transfer.',
+      '- **Adversarial recovery** instead of an oracle — Deeb & Roger (2024) finetune on a few forget facts and',
+      '  measure how much comes back. No oracle needed, and it catches suppression-not-deletion.',
+    ].join('\n'),
+    CreatedAt: iso(-2 * DAY + 6 * 60_000),
+  },
+  {
+    ID: 905,
+    SessionID: chatID(42),
+    Role: 'user',
+    Text: 'Is causal tracing just attention rollout with extra steps?',
+    CreatedAt: iso(-5 * DAY),
+  },
+  {
+    ID: 906,
+    SessionID: chatID(42),
+    Role: 'assistant',
+    Text: [
+      'No — they answer different questions.',
+      '',
+      'Attention rollout is *correlational*: it aggregates attention weights to say where information could have',
+      'flowed. Causal tracing (p. 4) intervenes: it corrupts the subject embeddings, then restores one hidden',
+      'state at a time and measures the recovered probability of the correct fact. That is an interventional',
+      'estimate of which state is decisive.',
+      '',
+      'The practical consequence is the one the paper cares about: rollout cannot tell you where to write, while',
+      'tracing hands you the layer ROME edits.',
+    ].join('\n'),
+    CreatedAt: iso(-5 * DAY + 11 * 60_000),
+  },
+  {
+    ID: 907,
+    SessionID: chatID(43),
+    Role: 'user',
+    Text: 'Explain value iteration the way slide 12 sets it up.',
+    CreatedAt: iso(-1 * DAY),
+  },
+  {
+    ID: 908,
+    SessionID: chatID(43),
+    Role: 'assistant',
+    Text: [
+      'Slide 12 states the Bellman optimality backup and then just iterates it to a fixed point.',
+      '',
+      '```',
+      'V_{k+1}(s) = max_a [ R(s,a) + gamma * sum_s\' P(s\'|s,a) V_k(s\') ]',
+      '```',
+      '',
+      'Because the backup operator is a gamma-contraction in the max norm, the iterates converge to the unique',
+      'V* for any initialisation, and the greedy policy w.r.t. V* is optimal. The slide stops the loop when',
+      '`max_s |V_{k+1}(s) - V_k(s)| < epsilon (1-gamma)/(2 gamma)`, which bounds the policy loss by epsilon.',
+    ].join('\n'),
+    CreatedAt: iso(-1 * DAY + 4 * 60_000),
+  },
+];
+
+const CHAT_REPLIES: string[] = [
+  [
+    'Short answer: the two are complementary, and the paper only claims the weaker of the two.',
+    '',
+    '**What the paper shows.** The forget set loses accuracy under the reported prompts, and general benchmarks',
+    'stay within noise. That is a *behavioural* claim.',
+    '',
+    '**What it does not show.** Nothing rules out the information still sitting in the weights — the follow-up',
+    'work recovers most of it by finetuning on a handful of the supposedly forgotten facts.',
+    '',
+    'For the FYP the useful move is to report both: the behavioural number for comparability, and a recovery',
+    'probe for the claim you actually care about.',
+  ].join('\n'),
+  [
+    'Three things stand out in this section.',
+    '',
+    '1. The retain term does most of the work — the ablation without it costs about six points of general utility.',
+    '2. The forget objective is a gradient *ascent* term, so it is unbounded and needs the KL anchor to stay stable.',
+    '3. Hyperparameters are swept over three seeds only, so the error bars are wider than the table suggests.',
+    '',
+    'If you want one number to quote, use the retain-set MMLU delta rather than the forget accuracy: it is the one',
+    'that transfers across papers.',
+  ].join('\n'),
+  [
+    'Here is the comparison laid out.',
+    '',
+    '- **ROME** edits one fact with a closed-form rank-one update on a single mid-layer MLP.',
+    '- **MEMIT** spreads the same derivation over a range of layers, so thousands of edits stay stable.',
+    '- **Unlearning methods** (RMU, ECO) target *capabilities* rather than individual facts, and mostly work by',
+    '  corrupting representations instead of rewriting them.',
+    '',
+    'The open question your project sits on is whether "delete" is best expressed as an edit toward a null value,',
+    'or as a representation-level intervention. Nobody has a clean answer yet.',
+  ].join('\n'),
+];
+
+let chatReplyN = 0;
+const chatTimers = new Map<string, Array<ReturnType<typeof setTimeout>>>();
+
+/** Streams a canned reply through `chat:delta`, then `chat:done`. */
+function streamChatReply(sessionID: string): string {
+  const jobID = `job-${++jobSeq}`;
+  const text = CHAT_REPLIES[chatReplyN++ % CHAT_REPLIES.length];
+  const chunks = text.match(/\S+\s*/g) ?? [text];
+  const timers: Array<ReturnType<typeof setTimeout>> = [];
+  chatTimers.set(sessionID, timers);
+
+  let acc = '';
+  chunks.forEach((chunk, i) => {
+    timers.push(
+      setTimeout(() => {
+        acc += chunk;
+        localEmitter.emit('chat:delta', { SessionID: sessionID, Text: chunk });
+      }, 300 + i * 22),
+    );
+  });
+  timers.push(
+    setTimeout(() => {
+      CHAT_MESSAGES.push({
+        ID: ++chatMsgSeq,
+        SessionID: sessionID,
+        Role: 'assistant',
+        Text: acc,
+        CreatedAt: new Date().toISOString(),
+      });
+      const s = CHAT_SESSIONS.find((x) => x.ID === sessionID);
+      if (s) s.UpdatedAt = new Date().toISOString();
+      localEmitter.emit('chat:done', { SessionID: sessionID, JobID: jobID, Error: '' });
+      chatTimers.delete(sessionID);
+    }, 300 + chunks.length * 22 + 120),
+  );
+
+  // A job row so Cancel has something real to talk to.
+  const job: StudyJob = {
+    ID: jobID,
+    Kind: 'chat',
+    FileIDs: [],
+    Status: 'running',
+    Progress: 'Thinking…',
+    Error: '',
+    StartedAt: new Date().toISOString(),
+    FinishedAt: '',
+    Model: 'sonnet',
+    CostUSD: 0,
+  };
+  JOBS.unshift(job);
+  chatJobSessions.set(jobID, sessionID);
+  return jobID;
+}
+
+const chatJobSessions = new Map<string, string>();
+
 // ---------------------------------------------------------------- the mock
 
 export const mockAPI: AppAPI = {
@@ -1664,9 +2372,17 @@ export const mockAPI: AppAPI = {
   },
 
   CancelStudyJob: async (id) => {
-    const timers = jobTimers.get(id) ?? [];
+    const timers = [...(jobTimers.get(id) ?? []), ...(paperTimers.get(id) ?? [])];
     timers.forEach(clearTimeout);
     jobTimers.delete(id);
+    paperTimers.delete(id);
+    const chatSession = chatJobSessions.get(id);
+    if (chatSession) {
+      (chatTimers.get(chatSession) ?? []).forEach(clearTimeout);
+      chatTimers.delete(chatSession);
+      chatJobSessions.delete(id);
+      localEmitter.emit('chat:done', { SessionID: chatSession, JobID: id, Error: 'cancelled' });
+    }
     const j = JOBS.find((x) => x.ID === id);
     if (j && (j.Status === 'queued' || j.Status === 'running')) {
       j.Status = 'cancelled';
@@ -1684,4 +2400,258 @@ export const mockAPI: AppAPI = {
     if (!f || !/\.pdf$/i.test(f.Name)) return 0;
     return Math.max(4, Math.round(f.Size / 78_000));
   },
+// --------------------------------------------------------------- papers
+
+  SearchPapers: async (query, source, limit) => {
+    await delay(null, 420);
+    const q = query.trim().toLowerCase();
+    let list = ALL_PAPERS.filter((p) => source === 'all' || !source || p.Source === source);
+    if (q) {
+      const scored = list
+        .map((p) => {
+          const hay = `${p.Title} ${p.Abstract} ${p.TLDR} ${(p.Authors ?? []).join(' ')}`.toLowerCase();
+          let score = 0;
+          for (const term of q.split(/\s+/)) {
+            if (!term) continue;
+            if (p.Title.toLowerCase().includes(term)) score += 6;
+            if (hay.includes(term)) score += 2;
+          }
+          return { p, score };
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score || b.p.CitationCount - a.p.CitationCount);
+      list = scored.map((x) => x.p);
+      // An empty result is a bad demo; fall back to the seeded eight.
+      if (!list.length) list = ALL_PAPERS.filter((p) => source === 'all' || !source || p.Source === source);
+    } else {
+      list = [...list].sort((a, b) => b.CitationCount - a.CitationCount);
+    }
+    const capped = list.slice(0, limit > 0 ? limit : 20);
+    return { Papers: capped.map((p) => ({ ...p, Authors: [...(p.Authors ?? [])] })), Total: list.length };
+  },
+
+  GetPaper: async (id) => {
+    await delay(null, 160);
+    const p = paperByID(id);
+    if (!p) throw new Error(`No paper ${id}`);
+    return { ...p, Authors: [...(p.Authors ?? [])] };
+  },
+
+  AddPaperToLibrary: async (p) => {
+    await delay(null, 200);
+    const existing = LIBRARY.find((x) => x.ID === p.ID);
+    if (existing) return { ...existing };
+    const lp: LibraryPaper = {
+      ...p,
+      Status: 'toread',
+      Page: 0,
+      Pages: 0,
+      Stars: 0,
+      Tags: [],
+      Notes: '',
+      KeyIdea: '',
+      LocalPath: '',
+      AddedAt: new Date().toISOString(),
+      UpdatedAt: new Date().toISOString(),
+      ReadAt: '',
+      FileID: 0,
+    };
+    LIBRARY.unshift(lp);
+    localEmitter.emit('papers:updated');
+    localEmitter.emit('toast', { Level: 'success', Message: 'Added to library' });
+    return { ...lp };
+  },
+
+  RemovePaperFromLibrary: async (id) => {
+    await delay(null, 140);
+    const i = LIBRARY.findIndex((x) => x.ID === id);
+    if (i >= 0) LIBRARY.splice(i, 1);
+    localEmitter.emit('papers:updated');
+  },
+
+  GetLibrary: async (status) => {
+    await delay(null, 130);
+    const list = status && status !== 'all' ? LIBRARY.filter((p) => p.Status === status) : LIBRARY;
+    return list.map((p) => ({ ...p, Authors: [...(p.Authors ?? [])], Tags: [...(p.Tags ?? [])] }));
+  },
+
+  UpdateLibraryPaper: async (lp) => {
+    await delay(null, 120);
+    const i = LIBRARY.findIndex((x) => x.ID === lp.ID);
+    if (i < 0) throw new Error(`${lp.ID} is not in the library`);
+    const merged: LibraryPaper = {
+      ...LIBRARY[i],
+      ...lp,
+      Tags: [...(lp.Tags ?? [])],
+      UpdatedAt: new Date().toISOString(),
+      ReadAt: lp.Status === 'done' ? LIBRARY[i].ReadAt || new Date().toISOString() : '',
+    };
+    LIBRARY[i] = merged;
+    localEmitter.emit('papers:updated');
+    return { ...merged };
+  },
+
+  DownloadPaperPDF: async (id) => {
+    await delay(null, 1400);
+    let lp = LIBRARY.find((x) => x.ID === id);
+    if (!lp) {
+      const p = paperByID(id);
+      if (!p) throw new Error(`No paper ${id}`);
+      lp = await mockAPI.AddPaperToLibrary(p);
+      lp = LIBRARY.find((x) => x.ID === id)!;
+    }
+    const first = (lp.Authors ?? ['anon'])[0].split(/\s+/).pop();
+    lp.LocalPath = `${SYNC_ROOT}\\Papers\\${lp.Year} - ${first} - ${lp.Title.slice(0, 48)}.pdf`;
+    lp.FileID = lp.FileID || 2000 + LIBRARY.indexOf(lp);
+    lp.Pages = lp.Pages || 12 + ((lp.CitationCount % 17) + 3);
+    lp.UpdatedAt = new Date().toISOString();
+    localEmitter.emit('papers:updated');
+    localEmitter.emit('toast', { Level: 'success', Message: 'PDF downloaded to the Papers folder' });
+    return { ...lp };
+  },
+
+  GetCitations: async (id, limit) => {
+    await delay(null, 320);
+    return citationLinks(CITATIONS[id] ?? []).slice(0, limit > 0 ? limit : 20);
+  },
+
+  GetReferences: async (id, limit) => {
+    await delay(null, 320);
+    return citationLinks(REFERENCES[id] ?? []).slice(0, limit > 0 ? limit : 20);
+  },
+
+  GetRecommendations: async (limit) => {
+    await delay(null, 260);
+    const inLib = new Set(LIBRARY.map((p) => p.ID));
+    return ALL_PAPERS.filter((p) => !inLib.has(p.ID))
+      .sort((a, b) => b.Year - a.Year || b.CitationCount - a.CitationCount)
+      .slice(0, limit > 0 ? limit : 6)
+      .map((p) => ({ ...p, Authors: [...(p.Authors ?? [])] }));
+  },
+
+  GetPaperDigest: async (date) => {
+    await delay(null, 300);
+    const day = date || new Date().toISOString().slice(0, 10);
+    const picks = [EXTRA_PAPERS[1], PAPERS[7], EXTRA_PAPERS[2], PAPERS[5], EXTRA_PAPERS[0]];
+    return {
+      Date: day,
+      Papers: picks.map((p) => ({ ...p, Authors: [...(p.Authors ?? [])] })),
+      Reason: [
+        'new on arXiv · matches "LLM unlearning"',
+        'new on arXiv · matches "machine unlearning"',
+        'matches "knowledge unlearning"',
+        'cited by 2 papers in your library',
+        'recommended from TOFU and ROME',
+      ],
+    } as PaperDigest;
+  },
+
+  SendPaperDigestNow: async () => {
+    await delay(null, 900);
+    if (!paperTelegram.Configured) throw new Error('The paper bot is not paired yet');
+    localEmitter.emit('toast', { Level: 'success', Message: "Today's digest sent to Telegram" });
+  },
+
+  ExportBibTeX: async (ids) => {
+    await delay(null, 220);
+    const wanted = ids && ids.length ? ids : LIBRARY.map((p) => p.ID);
+    const out = wanted
+      .map((id) => paperByID(id) ?? LIBRARY.find((x) => x.ID === id))
+      .filter(Boolean)
+      .map((p) => toBibTeX(p as Paper));
+    return out.join('\n\n');
+  },
+
+  OpenScholar: async (query) => {
+    await delay(null, 60);
+    console.info('[mock] OpenScholar', query);
+    localEmitter.emit('toast', { Level: 'info', Message: 'Opened Google Scholar in your browser' });
+  },
+
+  StartPaperSummary: async (paperID, model) => {
+    await delay(null, 40);
+    return startPaperSummaryJob(paperID, model);
+  },
+
+  GetPaperSummary: async (paperID) => {
+    await delay(null, 80);
+    const s = PAPER_SUMMARIES.get(paperID);
+    return s ? { ...s } : { PaperID: '', Markdown: '', CreatedAt: '', Model: '' };
+  },
+
+  PairPaperTelegram: async () => {
+    await delay(null, 2400);
+    paperTelegram = { Configured: true, ChatID: '584219307', BotName: '@nuspapertracker_bot' };
+    settings.PaperTelegramChatID = paperTelegram.ChatID;
+    return paperTelegram.ChatID;
+  },
+
+  GetPaperTelegramStatus: async () => ({ ...paperTelegram }),
+
+  SendPaperTestTelegram: async () => {
+    await delay(null, 600);
+    if (!paperTelegram.Configured) throw new Error('The paper bot is not paired yet');
+    localEmitter.emit('toast', { Level: 'success', Message: 'Test message sent by the paper bot' });
+  },
+
+  // ----------------------------------------------------------------- chat
+
+  StartChat: async (fileID, paperID, model) => {
+    await delay(null, 200);
+    const s: ChatSession = {
+      ID: chatID(++chatSeq),
+      FileID: fileID,
+      PaperID: paperID,
+      Title: 'New chat',
+      ClaudeSessionID: '',
+      Model: model || 'sonnet',
+      CreatedAt: new Date().toISOString(),
+      UpdatedAt: new Date().toISOString(),
+    };
+    CHAT_SESSIONS.unshift(s);
+    return { ...s };
+  },
+
+  SendChat: async (sessionID, message) => {
+    await delay(null, 90);
+    const s = CHAT_SESSIONS.find((x) => x.ID === sessionID);
+    if (!s) throw new Error(`No chat session ${sessionID}`);
+    CHAT_MESSAGES.push({
+      ID: ++chatMsgSeq,
+      SessionID: sessionID,
+      Role: 'user',
+      Text: message,
+      CreatedAt: new Date().toISOString(),
+    });
+    if (!s.ClaudeSessionID) s.ClaudeSessionID = `mock-${sessionID}`;
+    if (s.Title === 'New chat') s.Title = message.length > 46 ? `${message.slice(0, 46)}…` : message;
+    s.UpdatedAt = new Date().toISOString();
+    return streamChatReply(sessionID);
+  },
+
+  GetChats: async (fileID, paperID) => {
+    await delay(null, 90);
+    return CHAT_SESSIONS.filter((s) => {
+      if (paperID) return s.PaperID === paperID;
+      if (fileID) return s.FileID === fileID;
+      return true; // 0 / "" means every session, per the contract
+    })
+      .sort((a, b) => Date.parse(b.UpdatedAt) - Date.parse(a.UpdatedAt))
+      .map((s) => ({ ...s }));
+  },
+
+  GetChatMessages: async (sessionID) => {
+    await delay(null, 110);
+    return CHAT_MESSAGES.filter((m) => m.SessionID === sessionID).map((m) => ({ ...m }));
+  },
+
+  DeleteChat: async (sessionID) => {
+    await delay(null, 120);
+    const i = CHAT_SESSIONS.findIndex((s) => s.ID === sessionID);
+    if (i >= 0) CHAT_SESSIONS.splice(i, 1);
+    for (let k = CHAT_MESSAGES.length - 1; k >= 0; k--) {
+      if (CHAT_MESSAGES[k].SessionID === sessionID) CHAT_MESSAGES.splice(k, 1);
+    }
+  },
 };
+

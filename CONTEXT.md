@@ -515,6 +515,36 @@ Contract: `docs/CONTRACT_PAPERS.md`. Code: `internal/papers/**`, `app_papers.go`
 - Desktop shortcut created at %USERPROFILE%\Desktop\NUSSync.lnk -> build/bin/nussync.exe.
   Taskbar pin cannot be automated on Win11; user pins manually.
 
+## Papers + chat frontend (2026-09-06)
+- Built against `docs/PAPERS_SPEC.md` and `docs/CONTRACT_PAPERS.md` while the Go
+  side was written concurrently. `CONTRACT_PAPERS.md` is the source of truth and
+  two things in it differ from the earlier spec sketch — the frontend follows the
+  contract: **ChatSession.ID / ChatMessage.SessionID / ChatDelta.SessionID /
+  ChatDone.SessionID are strings** (not ints), and **CitationLink embeds Paper**,
+  so its JSON is a flattened Paper plus `InLibrary` / `Status` (no `.Paper` key).
+- New files: `src/lib/views/Papers.svelte` (route `papers`, nav after Study),
+  `src/lib/components/ChatPanel.svelte` (fixed right panel, 390px, Ctrl+J /
+  top-bar button to toggle, Esc to close).
+- New stores in `src/lib/stores.ts`: `currentContext` {fileID, paperID, name}
+  (set by Files selection + context menu, Study's primary selection, Papers'
+  Chat button), `chatOpen` + `openChat()`, and `studyPreselect` + `studyFile()`
+  — Papers' "Study" button parks a FileID there and Study consumes it once on
+  mount. Deliberately a one-shot store, not a route param: the router is a plain
+  writable with no params.
+- Paper summaries ride the shared Study job queue: `study:job` events with
+  Kind `paper_summary`. Papers.svelte tracks the one in-flight job locally
+  (jobs carry no PaperID) and reloads the cached summary on `done`.
+- Mock gotcha found the hard way: seeded chat message ids overlapped the mock's
+  `chatMsgSeq`, producing duplicate `{#each}` keys that crashed ChatPanel and
+  made Ctrl+J silently stop working. Sequences now start above the seeds, and
+  optimistic rows use a dedicated negative counter.
+- Verified in `npm run dev` against the mock (8 search results, 5-paper library,
+  citations/references, recommendations, digest, a ~4s summary job, streaming
+  chat): search, add/download/open, status/stars/tags/notes autosave, drawer,
+  BibTeX modal, Ctrl+J, Esc, Enter vs Shift+Enter, and context switching from
+  Files. `npm run check` 0 errors, `npm run build` clean. Not yet run against
+  the real Go backend.
+
 ## Repo
 - GitHub: https://github.com/waihongteh/nussync (origin, branch main). Windows-only target; Mac/Linux port abandoned 2026-09-05 by user choice.
 
