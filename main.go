@@ -65,6 +65,15 @@ func main() {
 		},
 		BackgroundColour:  &options.RGBA{R: 15, G: 17, B: 21, A: 1},
 		HideWindowOnClose: true,
+		// Second launch (desktop shortcut while already in the tray) just
+		// raises the existing window instead of starting a duplicate
+		// process with its own bot loops and config writes.
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: "sg.nus.nussync.single-instance",
+			OnSecondInstanceLaunch: func(options.SecondInstanceData) {
+				app.ShowWindow()
+			},
+		},
 		OnStartup: func(ctx context.Context) {
 			app.startup(ctx)
 			startTray(app)
