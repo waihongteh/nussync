@@ -42,8 +42,110 @@ type APIError struct {
 	Body   string
 }
 
+// Error renders one short line, e.g.
+//
+//	canvas: GET /users/self -> 401 unauthenticated (user authorization required)
+//
+// The raw JSON body is deliberately dropped: only the API's own status word
+// and the FIRST errors[].message survive, so toasts and the Settings error
+// strip stay readable. Callers that need the body still have e.Body.
 func (e *APIError) Error() string {
-	return fmt.Sprintf("canvas: %s -> %d: %s", e.Path, e.Status, e.Body)
+	b := &strings.Builder{}
+	fmt.Fprintf(b, "canvas: GET %s -> %d", shortPath(e.Path), e.Status)
+	if word, msg := explainBody(e.Body); word != "" || msg != "" {
+		if word != "" {
+			b.WriteString(" " + word)
+		}
+		if msg != "" {
+			b.WriteString(" (" + msg + ")")
+		}
+	} else if txt := http.StatusText(e.Status); txt != "" {
+		b.WriteString(" " + strings.ToLower(txt))
+	}
+	return b.String()
+}
+
+// shortPath strips the scheme/host and the /api/v1 prefix so the message names
+// the endpoint rather than repeating the instance URL on every line.
+func shortPath(raw string) string {
+	p := raw
+	if u, err := url.Parse(raw); err == nil && u.Path != "" {
+		p = u.Path
+	}
+	p = strings.TrimPrefix(p, "/api/v1")
+	if p == "" {
+		p = raw
+	}
+	if len(p) > 120 {
+		p = p[:117] + "..."
+	}
+	return p
+}
+
+// explainBody pulls the status word and the first errors[].message out of a
+// Canvas error body. Canvas answers with several shapes:
+//
+//	{"status":"unauthenticated","errors":[{"message":"user authorization required"}]}
+//	{"errors":[{"message":"..."}]}
+//	{"errors":{"base":[{"message":"..."}]}}
+//	{"message":"..."}
+func explainBody(body string) (word, msg string) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "", ""
+	}
+	var v struct {
+		Status  string          `json:"status"`
+		Message string          `json:"message"`
+		Errors  json.RawMessage `json:"errors"`
+	}
+	if err := json.Unmarshal([]byte(body), &v); err != nil {
+		return "", oneLine(body)
+	}
+	word = strings.TrimSpace(v.Status)
+	msg = strings.TrimSpace(v.Message)
+
+	type errItem struct {
+		Message string `json:"message"`
+	}
+	if len(v.Errors) > 0 {
+		var list []errItem
+		if err := json.Unmarshal(v.Errors, &list); err == nil {
+			for _, e := range list {
+				if m := strings.TrimSpace(e.Message); m != "" && msg == "" {
+					msg = m
+					break
+				}
+			}
+		} else {
+			var byField map[string][]errItem
+			if err := json.Unmarshal(v.Errors, &byField); err == nil {
+			outer:
+				for _, list := range byField {
+					for _, e := range list {
+						if m := strings.TrimSpace(e.Message); m != "" {
+							msg = m
+							break outer
+						}
+					}
+				}
+			}
+		}
+	}
+	if word == "" && msg == "" {
+		return "", oneLine(body)
+	}
+	return word, oneLine(msg)
+}
+
+// oneLine collapses whitespace and caps the length, so nothing in an error can
+// break a single-line toast.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 160 {
+		s = s[:157] + "..."
+	}
+	return s
 }
 
 // IsPermission reports whether err is a 401/403 (per-course denial).

@@ -615,7 +615,7 @@
           {:else}
             Not signed in — run <span class="mono">claude auth login</span> in a terminal, then reload.
           {/if}
-          {#if status?.Error}<span class="faint"> {status.Error}</span>{/if}
+          {#if status?.Error}<span class="err-text faint">{status.Error}</span>{/if}
         </span>
         <button class="btn sm" onclick={loadStatus}>Re-check</button>
       </div>
@@ -625,7 +625,12 @@
       <div class="jobbar" class:err={job.Status === 'error'}>
         {#if busy}<span class="spinner"></span>{:else}<Icon name={job.Status === 'done' ? 'checkCircle' : 'info'} size={13} />{/if}
         <span class="job-kind">{job.Kind}</span>
-        <span class="job-line truncate">{job.Status === 'error' ? job.Error : jobLine || job.Progress}</span>
+        <span
+          class="job-line"
+          class:err-text={job.Status === 'error'}
+          class:truncate={job.Status !== 'error'}>{job.Status === 'error'
+            ? job.Error
+            : jobLine || job.Progress}</span>
         {#if elapsed}<span class="job-time faint">{elapsed}</span>{/if}
         {#if busy}
           <button class="btn sm" onclick={cancelJob}>Cancel</button>
@@ -1192,6 +1197,22 @@
   .banner.warn {
     background: var(--amber-soft);
     color: var(--amber);
+    align-items: flex-start;
+  }
+
+  /*
+   * A CLI failure or a Canvas body is arbitrary length, so every error string
+   * shown inline wraps and scrolls in place instead of truncating (which hides
+   * the only useful half) or stretching the bar off-screen.
+   */
+  .err-text {
+    display: block;
+    min-width: 0;
+    max-height: 8.7em;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
   }
 
   .banner span {
@@ -1213,6 +1234,7 @@
   .jobbar.err {
     background: var(--red-soft);
     color: var(--red);
+    align-items: flex-start;
   }
 
   .job-kind {

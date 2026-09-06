@@ -610,6 +610,59 @@ entirely on `GetQuizzes(0)` + `GetTree` + the `deadlines` store.
   constantly. It is enrichment only.
 - Scraping Google Scholar (no API, against its terms) — button only.
 
+## Incident: config.json lost its Canvas token (2026-09-06)
+
+**Symptom.** `%APPDATA%/NUSSync/config.json` was found with `CanvasToken:""`
+(Telegram tokens blank too) and only the *original 13* Settings keys — no
+`Hotkey`, no `Paper*`. The app then 401'd on every Canvas call.
+
+**Root cause.** A stale build was still running. The file is 2-space
+`json.MarshalIndent` in struct-declaration order, so a Go build wrote it — but
+a build whose `config.Settings` was older than the one on disk. Fingerprint,
+verified by string-grepping the binaries: the current `config.json` is missing
+exactly `PaperTopVenues` and `PaperPreferPublished`, and those two symbols are
+present in `build/bin/nussync.exe` but **absent from `build/bin/nussync-dev.exe`**
+(the `wails dev` build of an earlier revision). The incident file was the same
+failure one schema generation further back. Two instances were running at once,
+so the older one's `SaveSettings` — which at the time did a bare
+`config.Save(fromSettings(s))`, no merge, no guard — serialised *its* struct
+over the newer file, dropping the fields it did not know about and persisting
+the empty `CanvasToken` its Settings draft happened to hold (the draft is
+seeded before `GetSettings` resolves, so a Save that early sends blanks).
+Nothing was corrupt; a whole-struct overwrite from a stale process is enough.
+
+**Fixes (all in tree, uncommitted at time of writing).**
+- `main.go`: single-instance lock (`sg.nus.nussync.single-instance`) — the
+  second launch raises the existing window instead of running a rival writer.
+- `config.Merge` + `config.Read` + `config.ClearSecret`: an empty incoming
+  secret means "the caller does not have it", never "delete it"; nil slice =
+  unchanged, empty slice = cleared; `Read` parses without ever writing (unlike
+  `Load`, which creates the file). `ClearSecret` is the only way to blank a
+  token. Paired chat ids are treated as secrets too, so a stale draft cannot
+  un-pair a bot.
+- `App.SaveSettings` merges onto the freshest on-disk copy and logs which
+  secrets it had to preserve (names only, never values).
+- `watchConfig` uses `config.Read`, ignores a parse failure or a missing
+  `CanvasURL` (half-written file), never writes, and only ever *adopts*
+  non-empty values.
+- Settings.svelte: Save stays disabled until `GetSettings` resolves (`loaded`),
+  "Unsaved changes" is a real `deepEqual` (a stringify compare lied whenever
+  Svelte's state proxy reordered keys), and the payload is the current stored
+  settings with the draft laid over them. `Settings.svelte` is the only caller
+  of `api.saveSettings` — verified by grep, no quick action saves settings.
+- `canvas.APIError.Error()` is now one short line
+  (`canvas: GET /users/self -> 401 unauthenticated (user authorisation
+  required)`): first `errors[].message` only, body dropped (still on `e.Body`).
+- Inline errors wrap instead of truncating: `.err-text` (pre-wrap,
+  word-break, `max-height: 8.7em; overflow-y: auto`) in Settings (Canvas test
+  result, both Study CLI branches) and Study.svelte (status banner, job bar —
+  the job bar used to `truncate` an error, hiding the useful half).
+
+**Do not retry.** Do not "clean up" `config.json` by hand-writing a partial
+object, and do not leave a `wails dev` instance running while testing a
+`wails build` exe: the config file is whole-struct overwritten by whoever
+saves last, and only the merge guard now makes that survivable.
+
 ## Operational
 - Toolchain: Go 1.27 (`C:\Program Files\Go\bin`), wails CLI in `~/go/bin`,
   Node 22. Prepend both to PATH in Git Bash. `wails doctor` green.

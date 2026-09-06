@@ -844,8 +844,19 @@ func (a *App) GetSettings() Settings {
 }
 
 // SaveSettings persists settings and applies them immediately.
+//
+// The incoming struct is never trusted wholesale: it is merged onto whatever
+// is on disk right now (config.Merge), so a caller that sends an empty token
+// or a nil list cannot blank it. On 2026-09-06 a Save from the Settings view
+// wrote CanvasToken:"" over a working token; the guard below is what stops a
+// repeat, and it logs the field names (never the values) when it fires.
 func (a *App) SaveSettings(s Settings) error {
-	cfg := fromSettings(s)
+	cfg, kept := a.mergeIncomingSettings(s)
+	if len(kept) > 0 {
+		log.Printf("nussync: SaveSettings received empty %s; kept the stored value(s)",
+			strings.Join(kept, ", "))
+	}
+
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
@@ -877,6 +888,19 @@ func (a *App) SaveSettings(s Settings) error {
 	}
 	a.restartSyncTimer(saved.SyncIntervalMin)
 	return nil
+}
+
+// mergeIncomingSettings folds a Settings struct from the UI onto the freshest
+// copy of the stored configuration (the file, falling back to the in-memory
+// one when it cannot be read) and reports which secrets it had to preserve.
+// Split out of SaveSettings so the guard is unit-testable without the
+// registry/hotkey/scheduler side effects that follow the write.
+func (a *App) mergeIncomingSettings(s Settings) (config.Settings, []string) {
+	stored, err := config.Read()
+	if err != nil {
+		stored = a.settings()
+	}
+	return config.Merge(stored, fromSettings(s))
 }
 
 // TestCanvas verifies the token and returns the user's display name.
@@ -1129,22 +1153,35 @@ func (a *App) watchConfig(ctx context.Context) {
 				continue
 			}
 			last = fi.ModTime()
-			saved, err := config.Load()
+			// config.Read never writes (config.Load creates the file when it
+			// is missing); the watcher must only ever observe.
+			saved, err := config.Read()
 			if err != nil {
+				log.Printf("nussync: config.json changed but does not parse; ignoring")
+				continue
+			}
+			// A half-written or truncated file is not something to adopt.
+			if strings.TrimSpace(saved.CanvasURL) == "" {
+				log.Printf("nussync: config.json changed but has no CanvasURL; ignoring")
 				continue
 			}
 
 			a.mu.Lock()
-			changed := saved.TelegramToken != a.cfg.TelegramToken ||
-				saved.TelegramChatID != a.cfg.TelegramChatID ||
-				saved.PaperTelegramToken != a.cfg.PaperTelegramToken ||
-				saved.PaperTelegramChatID != a.cfg.PaperTelegramChatID
+			// Same rule as SaveSettings: an empty secret on disk means
+			// "unknown", never "forget the one we are holding".
+			adopt := func(dst *string, src string) bool {
+				if src == "" || src == *dst {
+					return false
+				}
+				*dst = src
+				return true
+			}
+			changed := adopt(&a.cfg.TelegramToken, saved.TelegramToken)
+			changed = adopt(&a.cfg.TelegramChatID, saved.TelegramChatID) || changed
+			changed = adopt(&a.cfg.PaperTelegramToken, saved.PaperTelegramToken) || changed
+			changed = adopt(&a.cfg.PaperTelegramChatID, saved.PaperTelegramChatID) || changed
 			if changed {
-				a.cfg.TelegramToken = saved.TelegramToken
-				a.cfg.TelegramChatID = saved.TelegramChatID
-				a.cfg.PaperTelegramToken = saved.PaperTelegramToken
-				a.cfg.PaperTelegramChatID = saved.PaperTelegramChatID
-				a.telegram = telegram.New(saved.TelegramToken)
+				a.telegram = telegram.New(a.cfg.TelegramToken)
 			}
 			cfg, tg := a.cfg, a.telegram
 			a.mu.Unlock()

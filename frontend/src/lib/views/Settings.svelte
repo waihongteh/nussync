@@ -7,7 +7,7 @@
   import { courses, loadCourses, settings, theme, toast } from '../stores';
   import { hideNonAcademic } from '../courseOrder';
   import type { Settings, StudyStatus, TelegramStatus } from '../types';
-  import { durLabel, lsGet, lsSet, parseDurLabel } from '../util';
+  import { deepEqual, durLabel, lsGet, lsSet, parseDurLabel } from '../util';
 
   const PET_MODES: Array<{ id: PetMode; label: string; help: string }> = [
     { id: 'dock', label: 'Docked', help: 'Sits at the bottom of the sidebar.' },
@@ -15,8 +15,14 @@
     { id: 'wander', label: 'Wander', help: 'Walks around on its own. Click it to say hi.' },
   ];
 
+  // `draft` stays null until GetSettings has actually resolved. Nothing may
+  // be saved before then: a draft seeded from an empty object would send blank
+  // credentials to SaveSettings, which is how config.json lost its Canvas
+  // token on 2026-09-06.
   let draft = $state<Settings | null>(null);
-  let baseline = $state<string>('');
+  /** The exact object GetSettings returned, for a truthful dirty check. */
+  let baseline = $state<Settings | null>(null);
+  let loaded = $state(false);
   let saving = $state(false);
 
   let showCanvasToken = $state(false);
@@ -163,7 +169,8 @@
       // The live theme store wins over whatever the backend last stored, so the
       // dropdown always shows what the window is actually rendering.
       draft.Theme = $theme;
-      baseline = JSON.stringify(draft);
+      baseline = structuredClone($state.snapshot(draft)) as Settings;
+      loaded = true;
     }
   });
 
@@ -174,19 +181,29 @@
       .catch(() => {});
   });
 
-  const dirty = $derived(draft !== null && JSON.stringify(draft) !== baseline);
+  // Deep, key-order-insensitive: re-assigning a field through Svelte's state
+  // proxy can reorder keys, and a stringify comparison then claims "Unsaved
+  // changes" for an edit that never happened.
+  const dirty = $derived(loaded && draft !== null && baseline !== null && !deepEqual(draft, baseline));
 
   async function save() {
-    if (!draft) return;
+    if (!draft || !loaded) return;
     saving = true;
     try {
-      const payload = structuredClone($state.snapshot(draft)) as Settings;
+      // Send the CURRENT stored settings with the draft laid over them, never
+      // the draft alone: any field this build does not know about (a newer
+      // backend, a section that never rendered) then survives the round trip.
+      const current = $settings ? (structuredClone($state.snapshot($settings)) as Settings) : null;
+      const payload = {
+        ...(current ?? {}),
+        ...(structuredClone($state.snapshot(draft)) as Settings),
+      } as Settings;
       await api.saveSettings(payload);
       settings.set(payload);
       if (payload.Theme === 'light' || payload.Theme === 'dark' || payload.Theme === 'system') {
         theme.set(payload.Theme);
       }
-      baseline = JSON.stringify(draft);
+      baseline = structuredClone($state.snapshot(draft)) as Settings;
       toast('Settings saved', 'success');
     } catch (err) {
       toast(`Save failed: ${errMsg(err)}`, 'error');
@@ -198,7 +215,7 @@
   function revert() {
     if (!$settings) return;
     draft = structuredClone($state.snapshot($settings)) as Settings;
-    baseline = JSON.stringify(draft);
+    baseline = structuredClone($state.snapshot(draft)) as Settings;
   }
 
   async function testCanvas() {
@@ -318,7 +335,7 @@
           <span class="chip amber">Unsaved changes</span>
           <button class="btn" onclick={revert} disabled={saving}>Revert</button>
         {/if}
-        <button class="btn primary" onclick={save} disabled={!dirty || saving}>
+        <button class="btn primary" onclick={save} disabled={!loaded || !dirty || saving}>
           {#if saving}<span class="spinner"></span>{/if}
           Save
         </button>
@@ -363,10 +380,14 @@
             </button>
             {#if canvasName}
               <span class="chip green"><Icon name="check" size={11} /> Connected as {canvasName}</span>
-            {:else if canvasError}
-              <span class="chip red"><Icon name="alert" size={11} /> {canvasError}</span>
             {/if}
           </div>
+          {#if canvasError}
+            <div class="err-strip" role="alert">
+              <Icon name="alert" size={12} />
+              <span class="err-text">{canvasError}</span>
+            </div>
+          {/if}
         </div>
       </section>
 
@@ -668,12 +689,13 @@
                 <div class="study-sub">
                   Install it and make sure <span class="mono">claude</span> is on your PATH, then re-check.
                   Nothing in the Study view will run until it is.
+                  {#if study?.Error}<span class="err-text block faint">{study.Error}</span>{/if}
                 </div>
               {:else if !study?.LoggedIn}
                 <div class="study-title">CLI found, but not signed in</div>
                 <div class="study-sub">
                   Run <span class="mono">claude auth login</span> in a terminal, then re-check.
-                  {#if study?.Error}<br /><span class="faint">{study.Error}</span>{/if}
+                  {#if study?.Error}<span class="err-text block faint">{study.Error}</span>{/if}
                 </div>
               {:else}
                 <div class="study-title">Ready</div>
@@ -1126,6 +1148,43 @@
   .choose {
     height: 32px;
     flex: none;
+  }
+
+  /*
+   * Error text is arbitrary length — a Canvas body, a Claude CLI failure — so
+   * every inline error in this view wraps and scrolls instead of stretching
+   * the card off-screen. `.chip` cannot do this: it is a fixed 21px nowrap pill.
+   */
+  .err-strip {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 7px 9px;
+    border-radius: 6px;
+    background: var(--red-soft);
+    color: var(--red);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .err-strip :global(svg) {
+    flex: 0 0 auto;
+    margin-top: 2px;
+  }
+
+  .err-text {
+    min-width: 0;
+    max-height: 8.7em;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .err-text.block {
+    display: block;
+    margin-top: 4px;
   }
 
   .chips {

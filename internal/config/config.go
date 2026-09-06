@@ -4,6 +4,7 @@ package config
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,4 +289,113 @@ func readDotEnv(path string) map[string]string {
 		}
 	}
 	return out
+}
+
+// Read parses config.json without ever writing to disk. Unlike Load it does
+// not create the file, does not import .env and does not normalise anything
+// away — it is the read side used by the running app's config watcher, which
+// must never be able to author a config.
+func Read() (Settings, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	p, err := Path()
+	if err != nil {
+		return Settings{}, err
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return Settings{}, err
+	}
+	s := Defaults()
+	if err := json.Unmarshal(b, &s); err != nil {
+		return Settings{}, err
+	}
+	normalize(&s)
+	return s, nil
+}
+
+// secretFields are the credentials that a caller must never be able to blank
+// by accident. They are only ever cleared by an explicit ClearSecret call.
+var secretFields = []struct {
+	name string
+	get  func(*Settings) *string
+}{
+	{"CanvasToken", func(s *Settings) *string { return &s.CanvasToken }},
+	{"TelegramToken", func(s *Settings) *string { return &s.TelegramToken }},
+	{"PaperTelegramToken", func(s *Settings) *string { return &s.PaperTelegramToken }},
+	// Chat ids are pairing state, not something the settings form edits: the
+	// UI only ever sets them through Pair. Treat them as secrets so a stale
+	// draft cannot un-pair a bot.
+	{"TelegramChatID", func(s *Settings) *string { return &s.TelegramChatID }},
+	{"PaperTelegramChatID", func(s *Settings) *string { return &s.PaperTelegramChatID }},
+}
+
+// Merge folds an incoming settings struct (typically straight from the UI)
+// onto the currently stored one and returns the result plus the names of any
+// secrets that were preserved because the caller sent an empty value.
+//
+// Two classes of field are taken from `stored` rather than `in`:
+//
+//   - Secrets (tokens and paired chat ids). A blank incoming secret means
+//     "the caller did not have it", never "delete it" — a Settings form
+//     seeded before GetSettings resolved, or a password input that lost its
+//     value, must not be able to wipe the Canvas token off disk. This is the
+//     guard for the 2026-09-06 incident where config.json ended up with an
+//     empty CanvasToken.
+//   - Nil slices. Wails sends `[]` for a list the user emptied and `null` for
+//     a field the caller does not know about (an older frontend, a partial
+//     struct), so nil means "unchanged" and empty means "cleared".
+func Merge(stored, in Settings) (Settings, []string) {
+	out := in
+	var kept []string
+	for _, f := range secretFields {
+		cur, next := f.get(&stored), f.get(&out)
+		if strings.TrimSpace(*next) == "" && *cur != "" {
+			*next = *cur
+			kept = append(kept, f.name)
+		}
+	}
+	if strings.TrimSpace(out.CanvasURL) == "" {
+		out.CanvasURL = stored.CanvasURL
+	}
+	if strings.TrimSpace(out.SyncDir) == "" {
+		out.SyncDir = stored.SyncDir
+	}
+	if out.ReminderLadder == nil {
+		out.ReminderLadder = stored.ReminderLadder
+	}
+	if out.SkipExts == nil {
+		out.SkipExts = stored.SkipExts
+	}
+	if out.PaperKeywords == nil {
+		out.PaperKeywords = stored.PaperKeywords
+	}
+	if out.PaperCategories == nil {
+		out.PaperCategories = stored.PaperCategories
+	}
+	if out.PaperTopVenues == nil {
+		out.PaperTopVenues = stored.PaperTopVenues
+	}
+	if strings.TrimSpace(out.Theme) == "" {
+		out.Theme = stored.Theme
+	}
+	return out, kept
+}
+
+// ClearSecret blanks one credential on disk. It is the only supported way to
+// remove a token, so that Merge can treat every empty incoming secret as
+// "unknown" rather than "delete".
+func ClearSecret(name string) error {
+	cur, err := Read()
+	if err != nil {
+		return err
+	}
+	for _, f := range secretFields {
+		if f.name == name {
+			*f.get(&cur) = ""
+			return Save(cur)
+		}
+	}
+	return errors.New("config: unknown secret " + name)
 }

@@ -432,3 +432,34 @@ export function markdownToHTML(md: string): string {
   flush();
   return out.join('\n');
 }
+
+/**
+ * Order-insensitive structural comparison.
+ *
+ * The Settings view uses it for the "Unsaved changes" indicator: comparing
+ * `JSON.stringify(draft)` against a stringified snapshot made the chip appear
+ * whenever a key was re-inserted in a different order (Svelte's state proxy
+ * does that when a field is reassigned), which is a lie — and a lie that
+ * invites a Save the user did not mean to make. Arrays stay order-sensitive,
+ * because the reminder ladder and the skip list are ordered.
+ */
+export function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') {
+    // NaN !== NaN, but two NaNs are not a user-visible change.
+    return Number.isNaN(a) && Number.isNaN(b);
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  const ak = Object.keys(a as Record<string, unknown>);
+  const bk = Object.keys(b as Record<string, unknown>);
+  if (ak.length !== bk.length) return false;
+  return ak.every(
+    (k) =>
+      Object.prototype.hasOwnProperty.call(b, k) &&
+      deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+  );
+}
