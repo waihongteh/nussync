@@ -3,10 +3,23 @@
   import CommandPalette from './lib/components/CommandPalette.svelte';
   import Icon from './lib/components/Icon.svelte';
   import PetOverlay from './lib/components/PetOverlay.svelte';
+  import ResizeHandle from './lib/components/ResizeHandle.svelte';
   import Sidebar from './lib/components/Sidebar.svelte';
   import Toasts from './lib/components/Toasts.svelte';
   import Tooltip from './lib/components/Tooltip.svelte';
-  import { initLayout, toggleSidebar } from './lib/layout';
+  import {
+    CHAT_RAIL_W,
+    CHAT_W_DEFAULT,
+    CHAT_W_MAX,
+    CHAT_W_MIN,
+    chatCollapsed,
+    chatW,
+    initLayout,
+    resolvedChatMode,
+    setChatColumnWidth,
+    setChatWidth,
+    toggleSidebar,
+  } from './lib/layout';
   import {
     chatOpen,
     initTheme,
@@ -48,6 +61,18 @@
 
   initTheme();
 
+  /** True when the chat is a column in the grid rather than a floating panel. */
+  const dockedChat = $derived($chatOpen && $resolvedChatMode === 'docked');
+  const chatColW = $derived($chatCollapsed ? CHAT_RAIL_W : $chatW);
+
+  /**
+   * Publish the column's real width so fixed-position things — the viewer's
+   * focus mode, the pet's wander bounds — can stay clear of it.
+   */
+  $effect(() => {
+    setChatColumnWidth(dockedChat ? chatColW : 0);
+  });
+
   $effect(() => {
     const teardown = wireEvents();
     const petTeardown = initPet();
@@ -87,7 +112,15 @@
     }
     if (e.key === 'Escape') {
       paletteOpen.set(false);
-      chatOpen.set(false);
+      /*
+       * A floating chat covers the view, so Esc always dismisses it. A docked
+       * one is part of the layout, and the view underneath has its own Esc
+       * (leave focus mode, close the preview) — so it only closes when the
+       * focus is actually inside the chat.
+       */
+      if (!dockedChat || (e.target as HTMLElement | null)?.closest?.('aside.chat')) {
+        chatOpen.set(false);
+      }
     }
   }
 
@@ -153,13 +186,37 @@
       {/if}
     </div>
   </main>
+
+  <!--
+    Docked chat: a real column, so the view to its left simply gets narrower
+    and the PDF underneath stays readable. The handle is skipped while the
+    column is collapsed to its rail — there is nothing to size.
+  -->
+  {#if dockedChat}
+    {#if !$chatCollapsed}
+      <ResizeHandle
+        value={$chatW}
+        min={CHAT_W_MIN}
+        max={CHAT_W_MAX}
+        def={CHAT_W_DEFAULT}
+        invert
+        label="Resize the chat"
+        onChange={setChatWidth}
+      />
+    {/if}
+    <div class="chat-col" style="width:{chatColW}px">
+      <ChatPanel docked />
+    </div>
+  {/if}
 </div>
 
 <!-- Free-roaming pet: a pointer-transparent layer above the views, below the
      chat panel / palette / toasts. Renders nothing in 'dock' mode. -->
 <PetOverlay />
 
-<ChatPanel />
+{#if !dockedChat}
+  <ChatPanel />
+{/if}
 <CommandPalette />
 <Toasts />
 <Tooltip />
@@ -253,5 +310,15 @@
   .content {
     flex: 1;
     min-height: 0;
+  }
+
+  .chat-col {
+    flex: none;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    /* Above the pet layer (30) so the pet cannot be drawn over the chat. */
+    position: relative;
+    z-index: 35;
   }
 </style>

@@ -175,6 +175,19 @@ export function setContext(fileID: number, paperID: string, name: string) {
   currentContext.set({ fileID, paperID, name });
 }
 
+/**
+ * A file the Files view should select and scroll into view. Bumped by the
+ * chat's context chip; Files consumes it and clears it back to 0.
+ */
+export const revealFileID = writable(0);
+
+/** Jump to Files and highlight `fileID` there. */
+export function revealInFiles(fileID: number) {
+  if (!fileID) return;
+  navigate('files');
+  revealFileID.set(fileID);
+}
+
 /** Right-side chat panel visibility (Ctrl+J, top-bar button, Esc to close). */
 export const chatOpen = writable(false);
 

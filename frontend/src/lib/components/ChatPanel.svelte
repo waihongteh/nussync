@@ -1,7 +1,14 @@
 <script lang="ts">
   /**
-   * Claude chat, docked to the right of every view. Toggled by the top-bar
-   * button or Ctrl+J, closed with Esc.
+   * Claude chat, to the right of every view. Toggled by the top-bar button or
+   * Ctrl+J.
+   *
+   * Two placements share this component:
+   *   docked   App.svelte renders it inside a real grid column, so the view
+   *            shrinks beside it and the file underneath stays readable
+   *   overlay  it floats over the view on its own, the old behaviour
+   * `docked` only changes the chrome (position, border, animation, the
+   * collapse chevron) — every bit of chat behaviour below is shared.
    *
    * Context comes from the `currentContext` store — Files sets the selected
    * file, Study its primary selection, Papers the selected paper. "No context"
@@ -11,10 +18,18 @@
    * instructions when GetStudyStatus() says it is missing or signed out.
    */
   import { api, errMsg, on } from '../api';
-  import { chatOpen, currentContext, toast } from '../stores';
+  import { chatCollapsed, chatForcedOverlay, toggleChatCollapsed, toggleChatMode } from '../layout';
+  import { chatOpen, currentContext, revealInFiles, toast } from '../stores';
   import type { ChatDelta, ChatDone, ChatMessage, ChatSession, StudyStatus } from '../types';
   import { lsGet, lsSet, markdownToHTML, relTime } from '../util';
   import Icon from './Icon.svelte';
+
+  interface Props {
+    /** Rendered as a column in App's content grid rather than floating. */
+    docked?: boolean;
+  }
+
+  let { docked = false }: Props = $props();
 
   const MODEL_KEY = 'nussync.chat.model';
 
@@ -42,6 +57,8 @@
   let scrollEl = $state<HTMLDivElement | null>(null);
 
   const ctx = $derived($currentContext);
+  /** The collapse chevron is a docked-only affordance. */
+  const collapsed = $derived(docked && $chatCollapsed);
   const ready = $derived(!!status?.CLIFound && !!status?.LoggedIn);
   const contextLabel = $derived(ctx.name || (ctx.paperID ? ctx.paperID : ctx.fileID ? `file #${ctx.fileID}` : ''));
 
@@ -243,19 +260,41 @@
     chatOpen.set(false);
   }
 
-  // Focus the composer when the panel opens.
+  // Focus the composer when the panel opens (but not when it is a rail).
   $effect(() => {
-    if ($chatOpen) {
+    if ($chatOpen && !collapsed) {
       queueMicrotask(() => inputEl?.focus());
     }
   });
 </script>
 
 {#if $chatOpen}
-  <aside class="chat" aria-label="Claude chat">
+  <aside class="chat" class:docked class:floating={!docked} class:collapsed aria-label="Claude chat">
+    {#if collapsed}
+      <div class="rail">
+        <button
+          class="icon-btn"
+          onclick={toggleChatCollapsed}
+          title="Expand the chat"
+          aria-label="Expand the chat"
+        >
+          <Icon name="chevronLeft" size={13} />
+        </button>
+        <Icon name="chat" size={14} />
+        <div class="grow"></div>
+        <button class="icon-btn" onclick={close} title="Close chat" aria-label="Close chat">
+          <Icon name="x" size={13} />
+        </button>
+      </div>
+    {:else}
     <header class="head">
       <Icon name="chat" size={14} />
       <span class="head-title">Chat</span>
+      {#if $chatForcedOverlay}
+        <span class="chip hint-chip" title="The window is too narrow to dock the chat — widen it to get the column back.">
+          narrow window
+        </span>
+      {/if}
       <div class="grow"></div>
       <select class="select model" bind:value={model} aria-label="Model">
         {#each status?.Models ?? ['opus', 'sonnet', 'haiku'] as m (m)}
@@ -268,17 +307,41 @@
       <button class="icon-btn" onclick={() => void newChat()} title="New chat" aria-label="New chat">
         <Icon name="plus" size={13} />
       </button>
-      <button class="icon-btn" onclick={close} title="Close (Esc)" aria-label="Close chat">
+      <button
+        class="icon-btn"
+        onclick={toggleChatMode}
+        title={docked ? 'Pop out — float the chat over the view' : 'Dock the chat as a column'}
+        aria-label={docked ? 'Pop the chat out' : 'Dock the chat'}
+      >
+        <Icon name={docked ? 'external' : 'sidebarCollapse'} size={13} />
+      </button>
+      {#if docked}
+        <button class="icon-btn" onclick={toggleChatCollapsed} title="Collapse the chat" aria-label="Collapse the chat">
+          <Icon name="chevronRight" size={13} />
+        </button>
+      {/if}
+      <button class="icon-btn" onclick={close} title={docked ? 'Close chat' : 'Close (Esc)'} aria-label="Close chat">
         <Icon name="x" size={13} />
       </button>
     </header>
 
     <div class="ctx">
       {#if contextLabel}
-        <span class="chip accent ctx-chip" title={contextLabel}>
-          <Icon name={ctx.paperID ? 'book' : 'fileText'} size={11} />
-          <span class="truncate">{contextLabel}</span>
-        </span>
+        {#if ctx.fileID}
+          <button
+            class="chip accent ctx-chip linky"
+            title="{contextLabel} — show it in Files"
+            onclick={() => revealInFiles(ctx.fileID)}
+          >
+            <Icon name={ctx.paperID ? 'book' : 'fileText'} size={11} />
+            <span class="truncate">{contextLabel}</span>
+          </button>
+        {:else}
+          <span class="chip accent ctx-chip" title={contextLabel}>
+            <Icon name={ctx.paperID ? 'book' : 'fileText'} size={11} />
+            <span class="truncate">{contextLabel}</span>
+          </span>
+        {/if}
       {:else}
         <span class="chip ctx-chip faint">No file selected — chatting without context</span>
       {/if}
@@ -380,11 +443,21 @@
         {/if}
       </div>
     </div>
+    {/if}
   </aside>
 {/if}
 
 <style>
   .chat {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--bg-elevated);
+    border-left: 1px solid var(--border);
+  }
+
+  /* Floating: on top of the view, with the shadow and the slide-in. */
+  .chat.floating {
     position: fixed;
     top: 0;
     right: 0;
@@ -392,12 +465,19 @@
     width: 390px;
     max-width: 100vw;
     z-index: 45;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-elevated);
-    border-left: 1px solid var(--border);
     box-shadow: var(--shadow-pop);
     animation: slide-in 160ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /*
+   * Docked: a plain column. App.svelte owns the width, so there is no
+   * positioning, no shadow and no animation here — a column that slides in
+   * would drag the whole view with it on every toggle.
+   */
+  .chat.docked {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
   }
 
   @keyframes slide-in {
@@ -405,6 +485,40 @@
       transform: translateX(16px);
       opacity: 0;
     }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .chat.floating {
+      animation: none;
+    }
+  }
+
+  .rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    height: 100%;
+    padding: 12px 0;
+    color: var(--text-faint);
+  }
+
+  .hint-chip {
+    height: 18px;
+    padding: 0 6px;
+    font-size: 10px;
+    color: var(--text-faint);
+    flex: none;
+  }
+
+  .linky {
+    cursor: pointer;
+    transition: filter var(--t);
+  }
+
+  .linky:hover {
+    filter: brightness(1.08);
+    text-decoration: underline;
   }
 
   .grow {
@@ -460,8 +574,11 @@
     flex: none;
   }
 
+  /* Flexible rather than a fixed 250px, so a dragged column keeps it whole. */
   .ctx-chip {
-    max-width: 250px;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
     height: 22px;
   }
 

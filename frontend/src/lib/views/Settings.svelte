@@ -6,8 +6,8 @@
 
   import { courses, loadCourses, settings, theme, toast } from '../stores';
   import { hideNonAcademic } from '../courseOrder';
-  import { resetLayout, sidebarMode } from '../layout';
-  import type { SidebarMode } from '../layout';
+  import { chatMode, resetLayout, sidebarMode } from '../layout';
+  import type { ChatMode, SidebarMode } from '../layout';
   import type { Settings, StudyStatus, TelegramStatus } from '../types';
   import { deepEqual, durLabel, lsGet, lsSet, parseDurLabel } from '../util';
 
@@ -689,6 +689,22 @@
             </span>
           </label>
 
+          <label class="field narrow">
+            <span class="lbl">Chat placement</span>
+            <select
+              class="select"
+              value={$chatMode}
+              onchange={(e) => chatMode.set(e.currentTarget.value as ChatMode)}
+            >
+              <option value="docked">Docked column (shrinks the view)</option>
+              <option value="overlay">Overlay (floats over the view)</option>
+            </select>
+            <span class="help">
+              Docked keeps the file you are asking about visible beside the chat. On a narrow window the chat
+              falls back to the overlay until there is room again.
+            </span>
+          </label>
+
           <div class="field start">
             <button
               class="btn"
@@ -699,7 +715,9 @@
             >
               <Icon name="sort" size={13} /> Reset layout
             </button>
-            <span class="help">Sidebar mode and width, folder tree visibility and width, preview focus.</span>
+            <span class="help">
+              Sidebar mode and width, folder tree visibility and width, chat placement and width, preview focus.
+            </span>
           </div>
         </div>
       </section>

@@ -22,10 +22,21 @@ import { lsGet, lsSet } from './util';
 
 export type SidebarMode = 'expanded' | 'rail' | 'auto';
 
+/**
+ * How the Claude chat presents itself.
+ *   'docked'   a real column in the content grid — the view shrinks beside it
+ *   'overlay'  the old floating panel that sits on top of the view
+ * Docked is the default: covering the PDF you are asking about defeats the
+ * point of asking about it.
+ */
+export type ChatMode = 'docked' | 'overlay';
+
 const SIDEBAR_KEY = 'nussync.layout.sidebar';
 const SIDEBAR_W_KEY = 'nussync.layout.sidebarW';
 const TREE_KEY = 'nussync.layout.tree';
 const TREE_W_KEY = 'nussync.layout.treeW';
+const CHAT_MODE_KEY = 'nussync.layout.chatMode';
+const CHAT_W_KEY = 'nussync.layout.chatW';
 
 /** Collapsed icon-rail width. Matches the `.sidebar.rail` CSS. */
 export const RAIL_W = 56;
@@ -38,6 +49,12 @@ export const TREE_W_DEFAULT = 250;
 export const TREE_W_MIN = 180;
 export const TREE_W_MAX = 420;
 
+export const CHAT_W_DEFAULT = 380;
+export const CHAT_W_MIN = 320;
+export const CHAT_W_MAX = 560;
+/** Width of the docked chat once the collapse chevron has been used. */
+export const CHAT_RAIL_W = 40;
+
 /** Below this window width, 'auto' means rail. */
 export const AUTO_RAIL_BELOW = 1100;
 /** Widening past this drops an explicit override back to 'auto'. */
@@ -46,11 +63,22 @@ export const AUTO_EXPAND_ABOVE = 1200;
 /** Below this *content* width, Files hides the tree while a viewer is open. */
 export const TREE_AUTOHIDE_BELOW = 900;
 
+/**
+ * Below this *content* width (window minus sidebar) a docked chat would leave
+ * the view too little room, so it falls back to the overlay. The stored
+ * preference is untouched, so widening the window docks it again.
+ */
+export const CHAT_DOCK_MIN_CONTENT = 1100;
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 function readMode(): SidebarMode {
   const v = lsGet<string>(SIDEBAR_KEY, 'auto');
   return v === 'expanded' || v === 'rail' ? v : 'auto';
+}
+
+function readChatMode(): ChatMode {
+  return lsGet<string>(CHAT_MODE_KEY, 'docked') === 'overlay' ? 'overlay' : 'docked';
 }
 
 export const sidebarMode = writable<SidebarMode>(readMode());
@@ -61,6 +89,12 @@ export const sidebarW = writable<number>(
 /** Files' folder tree visibility. */
 export const treeOpen = writable<boolean>(lsGet<boolean>(TREE_KEY, true));
 export const treeW = writable<number>(clamp(lsGet<number>(TREE_W_KEY, TREE_W_DEFAULT), TREE_W_MIN, TREE_W_MAX));
+
+/** Chat placement preference. */
+export const chatMode = writable<ChatMode>(readChatMode());
+export const chatW = writable<number>(clamp(lsGet<number>(CHAT_W_KEY, CHAT_W_DEFAULT), CHAT_W_MIN, CHAT_W_MAX));
+/** Docked chat squeezed down to its rail. Momentary, so not persisted. */
+export const chatCollapsed = writable(false);
 
 /** Viewer focus mode. Deliberately not persisted — it is a momentary state. */
 export const viewerFocus = writable(false);
@@ -75,10 +109,28 @@ export const resolvedSidebar = derived([sidebarMode, winW], ([$mode, $w]) =>
 
 export const isRail = derived(resolvedSidebar, ($s) => $s === 'rail');
 
+/** Width left for everything right of the sidebar. */
+export const contentW = derived([winW, resolvedSidebar, sidebarW], ([$w, $s, $sw]) =>
+  Math.max(0, $w - ($s === 'rail' ? RAIL_W : $sw)),
+);
+
+/** True when the window is too narrow to dock the chat. */
+export const chatCramped = derived(contentW, ($c) => $c < CHAT_DOCK_MIN_CONTENT);
+
+/** What the chat actually renders as, once the narrow-window fallback applies. */
+export const resolvedChatMode = derived([chatMode, chatCramped], ([$m, $cramped]): ChatMode =>
+  $m === 'docked' && $cramped ? 'overlay' : $m,
+);
+
+/** True only while a docked preference is being overridden by the window width. */
+export const chatForcedOverlay = derived([chatMode, chatCramped], ([$m, $c]) => $m === 'docked' && $c);
+
 sidebarMode.subscribe((v) => lsSet(SIDEBAR_KEY, v));
 sidebarW.subscribe((v) => lsSet(SIDEBAR_W_KEY, Math.round(v)));
 treeOpen.subscribe((v) => lsSet(TREE_KEY, v));
 treeW.subscribe((v) => lsSet(TREE_W_KEY, Math.round(v)));
+chatMode.subscribe((v) => lsSet(CHAT_MODE_KEY, v));
+chatW.subscribe((v) => lsSet(CHAT_W_KEY, Math.round(v)));
 
 /** Flip between rail and expanded, starting from whatever is on screen now. */
 export function toggleSidebar() {
@@ -101,12 +153,39 @@ export function setTreeWidth(px: number) {
   treeW.set(clamp(Math.round(px), TREE_W_MIN, TREE_W_MAX));
 }
 
+export function setChatWidth(px: number) {
+  chatW.set(clamp(Math.round(px), CHAT_W_MIN, CHAT_W_MAX));
+}
+
+/** Send the chat to the other placement, un-collapsing it on the way. */
+export function toggleChatMode() {
+  chatCollapsed.set(false);
+  chatMode.update((m) => (m === 'docked' ? 'overlay' : 'docked'));
+}
+
+export function toggleChatCollapsed() {
+  chatCollapsed.update((v) => !v);
+}
+
 export function resetLayout() {
   sidebarMode.set('auto');
   sidebarW.set(SIDEBAR_W_DEFAULT);
   treeOpen.set(true);
   treeW.set(TREE_W_DEFAULT);
+  chatMode.set('docked');
+  chatW.set(CHAT_W_DEFAULT);
+  chatCollapsed.set(false);
   viewerFocus.set(false);
+}
+
+/**
+ * Width the docked chat column actually occupies right now — 0 whenever the
+ * chat is closed or floating. Published as `--chat-w` by `setChatColumnWidth`
+ * so fixed-position things (the viewer's focus mode) can keep clear of it.
+ */
+export function setChatColumnWidth(px: number) {
+  if (typeof document === 'undefined') return;
+  document.documentElement.style.setProperty('--chat-w', `${Math.round(px)}px`);
 }
 
 let wired = false;
@@ -122,6 +201,7 @@ export function initLayout(): () => void {
 
   let prev = window.innerWidth;
   winW.set(prev);
+  setChatColumnWidth(0);
 
   const onResize = () => {
     const w = window.innerWidth;

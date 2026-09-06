@@ -14,7 +14,9 @@
    * `prefers-reduced-motion` downgrades wander to the (visually static) drag
    * behaviour. All XP / mood / quip logic still lives in ../pet.ts.
    */
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
+  import { chatCollapsed, chatW, resolvedChatMode } from '../layout';
+  import { chatOpen } from '../stores';
   import {
     bubble,
     level,
@@ -61,7 +63,19 @@
     return el ? el.getBoundingClientRect() : null;
   }
 
-  const maxX = () => Math.max(MARGIN, window.innerWidth - SIZE - MARGIN);
+  /**
+   * Right edge of the roaming area. A docked chat is a real column, so the pet
+   * would otherwise walk underneath it (the layer is below the chat and does
+   * not clip) — measure the column and stop at its left edge instead. The
+   * floating chat is deliberately not measured: it is transient, and the pet
+   * strolling behind it is the same as it strolling behind the palette.
+   */
+  const rightEdge = () => {
+    const c = box('aside.chat.docked');
+    return c && c.width > 0 ? c.left : window.innerWidth;
+  };
+
+  const maxX = () => Math.max(MARGIN, rightEdge() - SIZE - MARGIN);
   const maxY = () => Math.max(MARGIN, window.innerHeight - SIZE - MARGIN);
   const floorY = () => maxY();
   /** Left edge of the content area (just right of the sidebar). */
@@ -98,6 +112,27 @@
       applyFractions($petPos);
     }
   }
+
+  /*
+   * Opening, resizing or collapsing the docked chat changes the roaming area
+   * exactly as a window resize does, so re-run the same clamp. `tick()` rather
+   * than rAF: the column has to be in the DOM before it can be measured, and a
+   * background tab never gets a frame.
+   */
+  $effect(() => {
+    void $chatOpen;
+    void $chatW;
+    void $resolvedChatMode;
+    void $chatCollapsed;
+    if (!shown) return;
+    let live = true;
+    void tick().then(() => {
+      if (live) onResize();
+    });
+    return () => {
+      live = false;
+    };
+  });
 
   $effect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');

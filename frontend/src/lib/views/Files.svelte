@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { api, errMsg } from '../api';
   import ContextMenu from '../components/ContextMenu.svelte';
   import FolderTree from '../components/FolderTree.svelte';
@@ -16,7 +17,17 @@
     treeW,
     viewerFocus,
   } from '../layout';
-  import { courses, courseByID, flatFiles, openChat, openFileNode, selectedCourseID, setContext, toast } from '../stores';
+  import {
+    courses,
+    courseByID,
+    flatFiles,
+    openChat,
+    openFileNode,
+    revealFileID,
+    selectedCourseID,
+    setContext,
+    toast,
+  } from '../stores';
   import type { FileNode, MenuItem, SearchHit } from '../types';
   import { debounce, fileKind, fmtBytes, lsGet, lsSet, relTime, snippetHTML } from '../util';
 
@@ -36,6 +47,12 @@
   const SELECTED_KEY = 'nussync.files.selectedFolder';
   const VIEWER_W_KEY = 'nussync.viewer.w';
   const VIEWER_MIN = 320;
+  /** Width the list pane holds on to before the viewer starts giving ground. */
+  const LIST_MIN = 260;
+  /** …and the width below which the viewer stops giving ground instead. */
+  const VIEWER_FLOOR = 420;
+  /** `ResizeHandle`'s own width, which the panes row also has to pay for. */
+  const HANDLE_W = 5;
 
   let roots = $state<FileNode[]>([]);
   let loading = $state(true);
@@ -50,6 +67,7 @@
   let viewerOpen = $state(false);
   let viewerW = $state(Math.max(VIEWER_MIN, lsGet<number>(VIEWER_W_KEY, 520)));
   let panesEl = $state<HTMLDivElement | null>(null);
+  let tableWrapEl = $state<HTMLDivElement | null>(null);
   /** Measured width of the panes row, for the tree's auto-hide rule. */
   let panesW = $state(1200);
 
@@ -221,6 +239,32 @@
       : null,
   );
 
+  /**
+   * The chat's context chip asks for its file to be shown here. The folder
+   * filter and the search box are both cleared first, otherwise the row we
+   * want to scroll to may not be in the table at all.
+   */
+  $effect(() => {
+    const id = $revealFileID;
+    if (!id) return;
+    revealFileID.set(0);
+    const node = untrack(() => $flatFiles).find((f) => f.ID === id);
+    if (!node) return;
+    untrack(() => {
+      if (query) {
+        query = '';
+        serverHits = [];
+      }
+      if (selectedFolder && !paneFiles.some((f) => f.ID === id)) {
+        selectedFolder = '';
+        lsSet(SELECTED_KEY, '');
+      }
+      selectedFile = keyOf(node);
+      setContext(node.ID, '', node.Name);
+    });
+    queueMicrotask(() => tableWrapEl?.querySelector('tr.sel')?.scrollIntoView({ block: 'center' }));
+  });
+
   function closeViewer() {
     viewerOpen = false;
   }
@@ -251,6 +295,9 @@
   }
 
   function onKey(e: KeyboardEvent) {
+    // The docked chat is a sibling pane, not part of this view — its keys
+    // (Esc to close, arrows in the composer) are its own.
+    if ((e.target as HTMLElement | null)?.closest?.('aside.chat')) return;
     const mod = e.ctrlKey || e.metaKey;
     // Ctrl+Shift+P belongs to the viewer's focus mode, so shift is excluded.
     if (mod && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
@@ -285,8 +332,35 @@
 
   // ------------------------------------------------------- viewer resizing
 
+  /**
+   * Width left for the list and the viewer once the tree (and the dividers)
+   * have taken their share. `panesW` is measured, so a docked chat column has
+   * already been subtracted by the time this runs.
+   */
+  const availW = $derived(
+    Math.max(0, panesW - (treeShown ? $treeW + HANDLE_W : 0) - (viewerOpen ? HANDLE_W : 0)),
+  );
+
   /** Always leave room for the list pane (and the tree, when it is showing). */
-  const viewerMax = $derived(Math.max(VIEWER_MIN, panesW - (treeShown ? $treeW : 0) - 300));
+  const viewerMax = $derived(Math.max(VIEWER_MIN, availW - LIST_MIN));
+
+  /**
+   * What the viewer pane is actually given, as opposed to what the user asked
+   * for. Squeezing the content area — opening the chat, narrowing the window —
+   * spends the space in a fixed order: the tree hides (see `treeShown`), then
+   * the list narrows down to LIST_MIN while the viewer keeps its preference,
+   * and only then does the viewer give ground, down to VIEWER_FLOOR. Past that
+   * the list yields the rest, because a 300px PDF is no use to anyone.
+   *
+   * `viewerW` is never written by this, so the preference comes back untouched
+   * as soon as there is room for it again.
+   */
+  const effViewerW = $derived.by(() => {
+    if (!viewerOpen) return viewerW;
+    const wanted = Math.min(viewerW, Math.max(availW - LIST_MIN, VIEWER_FLOOR));
+    // Never wider than the row itself, whatever the floor says.
+    return Math.max(VIEWER_MIN, Math.min(wanted, Math.max(VIEWER_MIN, availW - 40)));
+  });
 
   function setViewerW(v: number) {
     viewerW = Math.min(viewerMax, Math.max(VIEWER_MIN, v));
@@ -459,7 +533,7 @@
         <span class="crumb-meta">{visibleFiles.length} files · {fmtBytes(totalBytes)}</span>
       </div>
 
-      <div class="table-wrap">
+      <div class="table-wrap" bind:this={tableWrapEl}>
         <table class="table">
           <thead>
             <tr>
@@ -521,7 +595,7 @@
 
     {#if viewerOpen}
       <ResizeHandle
-        value={viewerW}
+        value={effViewerW}
         min={VIEWER_MIN}
         max={viewerMax}
         def={520}
@@ -529,7 +603,7 @@
         label="Resize the preview pane"
         onChange={setViewerW}
       />
-      <div class="viewer-pane" style="width:{viewerW}px">
+      <div class="viewer-pane" style="width:{effViewerW}px">
         <Viewer
           file={previewFile}
           onClose={closeViewer}

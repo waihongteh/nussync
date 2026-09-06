@@ -62,6 +62,8 @@
       return;
     }
     if (!focused) return;
+    // A docked chat sits beside focus mode; its own Esc belongs to it.
+    if ((e.target as HTMLElement | null)?.closest?.('aside.chat')) return;
     if (e.key === 'Escape') {
       // Swallow it so the host does not also close the pane underneath.
       e.preventDefault();
@@ -379,14 +381,16 @@
 
   /**
    * Focus mode covers the content area — everything right of the sidebar and
-   * below the top bar. `--sidebar-w` is kept live by lib/layout.ts, so the rail
-   * and a dragged sidebar both land correctly.
+   * below the top bar. `--sidebar-w` is kept live by lib/layout.ts and
+   * `--chat-w` by App.svelte (0 unless the chat is docked open), so the rail, a
+   * dragged sidebar and a docked chat all land correctly. Focus mode plus a
+   * docked chat is the "read and ask" layout: viewer and chat, nothing else.
    */
   .viewer.focused {
     position: fixed;
     top: var(--topbar-h);
     left: var(--sidebar-w);
-    right: 0;
+    right: var(--chat-w, 0px);
     bottom: 0;
     z-index: 40;
     height: auto;

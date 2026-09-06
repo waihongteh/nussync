@@ -1007,6 +1007,21 @@ only — never backend settings) plus `resetLayout()`. Keys are namespaced
 - Settings → App grew a "Layout" sub-section (sidebar mode select + Reset
   layout); the palette gained Toggle sidebar / folder tree / preview focus mode
   / Reset layout, with the shortcut in the hint column.
+- **Chat is a docked column by default** (2026-09-06): `chatMode`
+  `'docked' | 'overlay'` (`nussync.layout.chatMode`, default docked) + `chatW`
+  (320–560, default 380). Docked, App renders `[sidebar][main][handle][chat]`
+  and `ChatPanel docked` drops its `position: fixed`/shadow/slide-in; App
+  publishes the live column width as `--chat-w` (0 when closed or floating), so
+  the viewer's focus mode (`right: var(--chat-w)`) and PetOverlay's `rightEdge()`
+  both stay clear of it — the pet re-clamps on a `tick()`, never rAF, because a
+  background tab gets no frames. Content narrower than 1100px forces overlay for
+  the session (`resolvedChatMode`, preference untouched, "narrow window" chip in
+  the header). Files spends a squeeze in a fixed order: tree auto-hides, then
+  the list narrows to 260px, then the viewer gives ground down to 420px
+  (`effViewerW`; `viewerW` stays the untouched preference). Esc closes a docked
+  chat only when the focus is inside it — Files' and Viewer's window handlers
+  bail on `closest('aside.chat')`, or typing in the composer would close the
+  preview or leave focus mode.
 - Verified 2026-09-06: `npm run check` 0 errors/0 warnings, `npm run build` ok;
   in-browser at 1400/1300/1000/880px — Ctrl+B, auto-rail, the 1200px revert,
   tooltips (light + dark), tree toggle + persistence, all three drags and a
