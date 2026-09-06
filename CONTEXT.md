@@ -701,3 +701,12 @@ the WebView2 line, and survives two Ctrl+Shift+N presses.
   Telegram bot. Frontend Papers view + chat panel is the frontend agent's half.
   Outstanding: pair the paper bot (@paper_trackerrr_bot), run
   `claude auth login` for summary/chat, then an integration pass and a build.
+- Queued 2026-09-06 morning: MarkAllAnnouncementsRead binding + button;
+  Deadlines badge = unsubmitted count only (not all upcoming).
+- Queued: sidebar courses drag-to-reorder (persist order), right-click Hide
+  (sidebar only; sync unaffected), collapsed "Hidden (n)" row to unhide,
+  "Hide non-academic" quick action.
+- Pet placement modes (2026-09-06): `petMode` dock/drag/wander in
+  `nussync.pet.prefs`, position fractions in `nussync.pet.pos`; SVG extracted to
+  `components/PetSprite.svelte`, non-dock modes render in `components/PetOverlay.svelte`
+  (fixed layer, `pointer-events:none`, z-index 30 = below chat 45 / palette 150 / toasts 200).

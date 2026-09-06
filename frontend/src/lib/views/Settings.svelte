@@ -1,10 +1,18 @@
 <script lang="ts">
   import { api, errMsg } from '../api';
   import Icon from '../components/Icon.svelte';
-  import { petEnabled, petName } from '../pet';
+  import { petEnabled, petMode, petName, resetPetPos } from '../pet';
+  import type { PetMode } from '../pet';
+
   import { courses, loadCourses, settings, theme, toast } from '../stores';
   import type { Settings, StudyStatus, TelegramStatus } from '../types';
   import { durLabel, lsGet, lsSet, parseDurLabel } from '../util';
+
+  const PET_MODES: Array<{ id: PetMode; label: string; help: string }> = [
+    { id: 'dock', label: 'Docked', help: 'Sits at the bottom of the sidebar.' },
+    { id: 'drag', label: 'Draggable', help: 'Floats over the app; drag it anywhere.' },
+    { id: 'wander', label: 'Wander', help: 'Walks around on its own. Click it to say hi.' },
+  ];
 
   let draft = $state<Settings | null>(null);
   let baseline = $state<string>('');
@@ -824,7 +832,7 @@
       <section class="card section">
         <div class="section-head">
           <h2>Pet</h2>
-          <p class="muted">The small creature at the bottom of the sidebar.</p>
+          <p class="muted">The small creature that reacts to your deadlines and sync.</p>
         </div>
         <div class="fields">
           <label class="switch-row">
@@ -851,6 +859,42 @@
             />
             <span class="help">Used in a few of its remarks.</span>
           </label>
+
+          <div class="field">
+            <span class="lbl">Placement</span>
+            <div class="seg" role="group" aria-label="Pet placement">
+              {#each PET_MODES as m (m.id)}
+                <button
+                  class="seg-btn"
+                  class:on={$petMode === m.id}
+                  disabled={!$petEnabled}
+                  aria-pressed={$petMode === m.id}
+                  onclick={() => petMode.set(m.id)}
+                  type="button"
+                >
+                  {m.label}
+                </button>
+              {/each}
+            </div>
+            <span class="help">{PET_MODES.find((m) => m.id === $petMode)?.help ?? ''}</span>
+          </div>
+
+          {#if $petMode !== 'dock'}
+            <div class="field start">
+              <button
+                class="btn sm"
+                type="button"
+                disabled={!$petEnabled}
+                onclick={() => {
+                  resetPetPos();
+                  toast('Pet moved back to its corner');
+                }}
+              >
+                Reset position
+              </button>
+              <span class="help">Puts the floating pet back in the bottom-right corner.</span>
+            </div>
+          {/if}
         </div>
       </section>
     {/if}
@@ -918,6 +962,49 @@
 
   .field.narrow {
     max-width: 260px;
+  }
+
+  .field.start {
+    align-items: flex-start;
+  }
+
+  /* segmented control (pet placement) */
+
+  .seg {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 2px;
+    gap: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-subtle);
+  }
+
+  .seg-btn {
+    height: 26px;
+    padding: 0 12px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: background var(--t), color var(--t);
+  }
+
+  .seg-btn:hover:not(:disabled):not(.on) {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .seg-btn.on {
+    background: var(--bg-elevated);
+    color: var(--text);
+    font-weight: 570;
+    box-shadow: 0 1px 2px rgba(15, 15, 25, 0.08);
+  }
+
+  .seg-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .row-field {

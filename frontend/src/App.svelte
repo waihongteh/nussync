@@ -2,6 +2,7 @@
   import ChatPanel from './lib/components/ChatPanel.svelte';
   import CommandPalette from './lib/components/CommandPalette.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import PetOverlay from './lib/components/PetOverlay.svelte';
   import Sidebar from './lib/components/Sidebar.svelte';
   import Toasts from './lib/components/Toasts.svelte';
   import {
@@ -137,6 +138,10 @@
     </div>
   </main>
 </div>
+
+<!-- Free-roaming pet: a pointer-transparent layer above the views, below the
+     chat panel / palette / toasts. Renders nothing in 'dock' mode. -->
+<PetOverlay />
 
 <ChatPanel />
 <CommandPalette />

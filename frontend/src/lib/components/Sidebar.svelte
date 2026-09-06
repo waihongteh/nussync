@@ -4,7 +4,7 @@
   import Icon from './Icon.svelte';
   import Pet from './Pet.svelte';
   import SyncPill from './SyncPill.svelte';
-  import { petEnabled } from '../pet';
+  import { petEnabled, petMode } from '../pet';
 
   const NAV: Array<{ id: Route; label: string; icon: string }> = [
     { id: 'home', label: 'Home', icon: 'home' },
@@ -43,6 +43,7 @@
       {@const badge = badgeFor(item.id)}
       <button
         class="nav-item"
+        data-nav={item.id}
         class:active={$route === item.id}
         onclick={() => navigate(item.id)}
         aria-current={$route === item.id ? 'page' : undefined}
@@ -81,7 +82,8 @@
     </div>
   </div>
 
-  {#if $petEnabled}
+  <!-- Docked pet only in 'dock' mode; the other modes render in PetOverlay. -->
+  {#if $petEnabled && $petMode === 'dock'}
     <Pet />
   {/if}
 

@@ -30,13 +30,24 @@ interface PetSave {
   day: string;
 }
 
+/** Where the pet lives: docked in the sidebar, draggable, or free-roaming. */
+export type PetMode = 'dock' | 'drag' | 'wander';
+
 interface PetPrefs {
   enabled: boolean;
   name: string;
+  mode: PetMode;
+}
+
+/** Overlay position, stored as fractions of the free area so resizes survive. */
+export interface PetPos {
+  fx: number;
+  fy: number;
 }
 
 const SAVE_KEY = 'nussync.pet';
 const PREFS_KEY = 'nussync.pet.prefs';
+const POS_KEY = 'nussync.pet.pos';
 
 const DEFAULT_NAME = 'Nibble';
 const IDLE_MS = 10 * 60_000;
@@ -47,17 +58,38 @@ const HOUR = 3_600_000;
 
 // --------------------------------------------------------------- preferences
 
-const prefs0 = lsGet<PetPrefs>(PREFS_KEY, { enabled: true, name: DEFAULT_NAME });
+const MODES: PetMode[] = ['dock', 'drag', 'wander'];
+const DEFAULT_POS: PetPos = { fx: 0.86, fy: 0.82 };
+
+const prefs0 = lsGet<PetPrefs>(PREFS_KEY, { enabled: true, name: DEFAULT_NAME, mode: 'dock' });
 
 export const petEnabled = writable<boolean>(prefs0.enabled !== false);
 export const petName = writable<string>(prefs0.name?.trim() || DEFAULT_NAME);
+export const petMode = writable<PetMode>(MODES.includes(prefs0.mode) ? prefs0.mode : 'dock');
 
 function savePrefs() {
-  lsSet(PREFS_KEY, { enabled: get(petEnabled), name: get(petName) });
+  lsSet(PREFS_KEY, { enabled: get(petEnabled), name: get(petName), mode: get(petMode) });
 }
 
 petEnabled.subscribe(savePrefs);
 petName.subscribe(savePrefs);
+petMode.subscribe(savePrefs);
+
+// ------------------------------------------------------------ overlay position
+
+function clampPos(p: Partial<PetPos> | null | undefined): PetPos {
+  const n = (v: unknown, d: number) => (typeof v === 'number' && isFinite(v) ? Math.min(1, Math.max(0, v)) : d);
+  return { fx: n(p?.fx, DEFAULT_POS.fx), fy: n(p?.fy, DEFAULT_POS.fy) };
+}
+
+export const petPos = writable<PetPos>(clampPos(lsGet<PetPos>(POS_KEY, DEFAULT_POS)));
+
+petPos.subscribe((p) => lsSet(POS_KEY, p));
+
+/** Put the overlay pet back in its default corner. */
+export function resetPetPos(): void {
+  petPos.set({ ...DEFAULT_POS });
+}
 
 // --------------------------------------------------------------- progression
 
