@@ -458,11 +458,79 @@ Contract: `docs/CONTRACT_PAPERS.md`. Code: `internal/papers/**`, `app_papers.go`
 - `--digest-send`: refused, "the paper bot @paper_trackerrr_bot is NOT paired".
 - `go build ./... && go vet ./... && go test ./... && gofmt -l .` all clean.
 
+## Study: readable PDF handling (2026-09-06)
+Code: `internal/study/readable.go` (+ `readable_test.go`), wired into
+`app_study.go` (`studySources`), `app_chat.go` (`runChatTurn`),
+`app_papers.go` (`StartPaperSummary`) and the `--study-test` banner.
+
+- **The "password-protected" error is a lie.** Claude Code's Read tool refuses
+  most NUS lecture PDFs with *"PDF is password-protected. Please provide an
+  unprotected version."* The files are **not** encrypted: the CS4246 Course
+  Overview deck has no `/Encrypt` anywhere in it and `api.DecryptFile` answers
+  "this file is not encrypted". Measured against CLI 2.1.251 on 2026-09-06,
+  two separate things make Read fire that message:
+  1. **Size.** A PDF over roughly 128 KiB is always refused. Accepted at
+     104.5 KB, refused at 141.7 KB, and it holds however the file was produced
+     — a pdfcpu rewrite of the same pages fails identically once it is big
+     enough. `ReadableLimit` is set to 120 KiB, the conservative side.
+  2. **Structure.** Some *small* files are refused too (a 38 KB PDF 1.3 essay
+     prompt, an 84 KB table). Rewriting exactly the same pages through pdfcpu
+     makes both readable, so the parser is choking on assembly, not content.
+     Not xref streams — flattening those changed nothing.
+- Consequence: **do not gate the fix on encryption detection.** Every PDF is
+  normalised through pdfcpu into `%LOCALAPPDATA%/NUSSync/study-cache/`
+  (`<fileid>-<sha of path|size|mtime>.pdf`, so an edited file re-caches). That
+  one step repairs the structural class *and* decrypts a genuinely
+  owner-password-protected file for free (`api.DecryptFile` with empty
+  passwords, tried first when the trailer holds `/Encrypt`).
+- When the normalised copy is still over `ReadableLimit`, `study.Resolve`
+  writes the FTS-extracted text to `<cache>/<fileid>.txt` and points Claude at
+  that, with `Source.Note` telling it this is a text-only extract and figures
+  are unavailable. The 662 KB CS4246 deck takes this path.
+- `pdfcpu` v0.15.0, pure Go. `api.DisableConfigDir()` once (a `sync.Once`) so
+  concurrent jobs never race on its config directory; `ValidationRelaxed`; the
+  call is wrapped in `recover` because pdfcpu panics on some malformed files.
+  Writes go to a temp file and are renamed.
+- `Resolve` is total: non-PDFs pass through, unopenable formats (pptx/docx)
+  keep `Readable=false` and the existing inline-text path, and when there is no
+  text either it hands back the original so Claude reports the real failure
+  rather than the job silently losing its only source.
+- **Known quality gap, not fixed.** For the big deck the model itself reported
+  the extract is partly garbled (grading weightage and registration slides), so
+  those sections of the overview are vague. The better fix is to split an
+  over-limit PDF into page-range chunks under `ReadableLimit` and hand Claude
+  several real PDFs — but single pages of that deck run 61–184 KB, so the
+  heaviest pages would still need the text fallback. Deferred.
+- **Config reload for the bots.** The CLI (`--pair`, `--notify-test`) writes
+  `config.json` directly, typically while the GUI is running, and nothing in
+  the GUI re-read it — a chat id paired from a terminal stayed invisible until
+  restart. `App.watchConfig` (app.go) now stats `config.json` every 60 s and,
+  when the four Telegram fields differ from memory, pushes them into
+  `sched.SetSettings` / `bot.SetConfig` / `papersApplySettings`. **The poll
+  loops do not need restarting**: `Bot.loop` and `PaperBot.loop` both call
+  `snapshot()` on every iteration, so a swapped client is picked up on the next
+  pass. Only the Telegram fields are copied back, so a disk write cannot
+  clobber the rest of the in-memory settings.
+
+### Verified run (2026-09-06)
+`go run . --study-test "<CS4246 Course Overview 2627-1.pdf>" sonnet 5`, with
+`claude auth login` finally done (the OAuth blocker in the 2026-09-05 notes is
+gone — `auth status` reports `loggedIn:true`, `claude.ai`, max):
+- Overview: **done in 1m18.089s, $0.0744**, all six sections present.
+- Quiz: **done in 1m30.926s, $0.0871**, 5 questions (4 mcq + 1 short) with
+  pages and explanations; perfect attempt graded **5/5**.
+- `go build ./... && go vet ./... && go test ./... && gofmt -l .` all clean.
+
+
 ## Dead ends
 - Sanitizing the whole cross-listed course code into one folder name.
 - Passing a multi-line `claude` prompt as an argv element on Windows (see above).
 - `claude --bare` for the Study backend: it disables OAuth and demands an API key.
 - Anthropic Go SDK for Study: needs an API key the user does not have.
+- Treating the Read tool's "PDF is password-protected" as meaning encrypted.
+  It is a generic failure message; see "Study: readable PDF handling".
+- Flattening cross-reference streams / object streams to PDF 1.4 layout to
+  make a big PDF readable. Makes no difference; only size does.
 - FTS5 contentless tables (`content=''`) — `snippet()` cannot work on them.
 - `regexp.MustCompile` with a backreference (`</\1>`) — panics at init in RE2.
 - Guarding `FileIDsInHTML` with `strings.Contains(body, "/files/")` *before*

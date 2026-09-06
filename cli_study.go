@@ -77,12 +77,28 @@ func runStudyCLI(args []string) int {
 		return 1
 	}
 	pages, _ := app.GetFilePageCount(fileID)
-	fmt.Printf("File: %s\n  id=%d pages=%d readable-by-claude=%v\n\n",
+	fmt.Printf("File: %s\n  id=%d pages=%d readable-by-claude=%v\n",
 		path, fileID, pages, study.ClaudeCanRead(path))
+
+	// Show what the job will actually hand to the Read tool. Most lecture PDFs
+	// are refused as they sit on disk, so this is either a normalised copy in
+	// the study cache or a text extract — worth seeing before blaming a prompt.
+	prep := study.Resolve(path, fileID, func() string {
+		txt, _ := app.st.StudyFileText(fileID)
+		return txt
+	})
+	kind := "normalised PDF"
+	switch {
+	case prep.TextOnly:
+		kind = "text extract (figures unavailable)"
+	case prep.Path == path:
+		kind = "original, unchanged"
+	}
+	fmt.Printf("  Claude will read: %s\n    (%s)\n\n", prep.Path, kind)
 
 	fmt.Printf("Command line (the prompt is written to stdin, not argv): claude %s\n\n",
 		studyRedactedArgs(study.Args(study.Options{
-			Model: model, MaxTurns: 40, AddDirs: []string{filepath.Dir(path)},
+			Model: model, MaxTurns: 40, AddDirs: []string{filepath.Dir(prep.Path)},
 		})))
 
 	rc := 0

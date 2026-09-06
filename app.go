@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -122,6 +123,8 @@ func (a *App) startup(ctx context.Context) {
 	a.bot.Sync = a.telegramSync
 	a.bot.OnPair = func(chatID string) { _, _ = a.savePairedChat(chatID) }
 	a.bot.Start(ctx)
+
+	a.watchConfig(ctx)
 
 	a.applyLaunchAtLogin(cfg.LaunchAtLogin)
 	a.applyHotkey(cfg.Hotkey)
@@ -1021,4 +1024,79 @@ func revealInExplorer(path string) error {
 	_ = cmd.Start()
 	go func() { _ = cmd.Wait() }()
 	return nil
+}
+
+// configPollInterval is how often the running app re-checks config.json.
+const configPollInterval = 60 * time.Second
+
+// watchConfig re-reads config.json on a timer and re-points the Telegram bots
+// when their settings changed underneath the running app.
+//
+// The CLI writes config.json directly: `--pair` stores a chat id and
+// `--notify-test` can import a token, and both are typically run in a terminal
+// while the GUI is up. Nothing in the GUI re-reads the file, so before this the
+// paired chat stayed invisible to the running bot until the next restart.
+//
+// Restarting the poll loops is not needed: Bot.loop and PaperBot.loop take a
+// fresh snapshot() of client+chat id on every iteration, so pushing the new
+// settings in through SetConfig is enough. Only the Telegram fields are copied
+// back, so a concurrent edit on disk cannot clobber the rest of the in-memory
+// settings.
+func (a *App) watchConfig(ctx context.Context) {
+	path, err := config.Path()
+	if err != nil {
+		return
+	}
+	last := time.Time{}
+	if fi, err := os.Stat(path); err == nil {
+		last = fi.ModTime()
+	}
+
+	go func() {
+		t := time.NewTicker(configPollInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			fi, err := os.Stat(path)
+			if err != nil || !fi.ModTime().After(last) {
+				continue
+			}
+			last = fi.ModTime()
+			saved, err := config.Load()
+			if err != nil {
+				continue
+			}
+
+			a.mu.Lock()
+			changed := saved.TelegramToken != a.cfg.TelegramToken ||
+				saved.TelegramChatID != a.cfg.TelegramChatID ||
+				saved.PaperTelegramToken != a.cfg.PaperTelegramToken ||
+				saved.PaperTelegramChatID != a.cfg.PaperTelegramChatID
+			if changed {
+				a.cfg.TelegramToken = saved.TelegramToken
+				a.cfg.TelegramChatID = saved.TelegramChatID
+				a.cfg.PaperTelegramToken = saved.PaperTelegramToken
+				a.cfg.PaperTelegramChatID = saved.PaperTelegramChatID
+				a.telegram = telegram.New(saved.TelegramToken)
+			}
+			cfg, tg := a.cfg, a.telegram
+			a.mu.Unlock()
+
+			if !changed {
+				continue
+			}
+			log.Printf("nussync: Telegram settings changed on disk, re-pointing bots")
+			if a.sched != nil {
+				a.sched.SetSettings(cfg, tg)
+			}
+			if a.bot != nil {
+				a.bot.SetConfig(cfg, tg)
+			}
+			a.papersApplySettings(cfg)
+		}
+	}()
 }

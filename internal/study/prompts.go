@@ -12,6 +12,7 @@ type Source struct {
 	Pages     int    // 0 when unknown / not a PDF
 	Text      string // fallback extracted text when Claude cannot read the file
 	Readable  bool   // Claude Code can open this format directly
+	Note      string // caveat about Path, e.g. that it is a text-only extract
 	CourseTag string
 }
 
@@ -33,6 +34,9 @@ func sourceBlock(srcs []Source) string {
 		sb.WriteString("\n")
 		if s.Readable && s.Path != "" {
 			fmt.Fprintf(&sb, "   Read this file with the Read tool: %s\n", s.Path)
+			if s.Note != "" {
+				fmt.Fprintf(&sb, "   %s\n", s.Note)
+			}
 			if s.Pages > ChunkThreshold {
 				fmt.Fprintf(&sb, "   It is long (%d pages): read it in chunks with the offset/limit "+
 					"arguments rather than in one call, and cover the whole document.\n", s.Pages)

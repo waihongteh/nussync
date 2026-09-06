@@ -807,17 +807,24 @@ func (a *App) StartPaperSummary(paperID string, model string) (string, error) {
 			}
 			a.papersChanged()
 		}
+		// Papers are usually clean arXiv PDFs, but the resolver is applied here
+		// too so every Claude path goes through the same readable-copy rules.
+		p := study.Resolve(row.LocalPath, row.FileID, func() string {
+			txt, _ := a.st.StudyFileText(row.FileID)
+			return txt
+		})
 		src := study.Source{
 			Name:     row.Title,
-			Path:     row.LocalPath,
+			Path:     p.Path,
 			Pages:    row.Pages,
-			Readable: study.ClaudeCanRead(row.LocalPath),
+			Readable: p.Readable,
+			Note:     p.Note,
 		}
 		if !src.Readable && row.FileID != 0 {
 			txt, _ := a.st.StudyFileText(row.FileID)
 			src.Text = study.ClampText(txt)
 		}
-		dir := filepath.Dir(row.LocalPath)
+		dir := filepath.Dir(src.Path)
 		o := a.studyOpts(j.Model, dir, []string{dir}, study.NeedsRead([]study.Source{src}))
 
 		a.setStudyProgress(id, "Reading "+row.Title+"…")

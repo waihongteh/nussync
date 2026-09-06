@@ -110,6 +110,16 @@ func (a *App) runChatTurn(ctx context.Context, jobID, sessionID, message string)
 	}
 
 	name, path, fileID := a.chatContext(s)
+	// Same readable-path resolution as the Study jobs: a raw lecture PDF is
+	// often refused by the Read tool, so point the turn at the cached copy.
+	var note string
+	if path != "" {
+		p := study.Resolve(path, fileID, func() string {
+			txt, _ := a.st.StudyFileText(fileID)
+			return txt
+		})
+		path, note = p.Path, p.Note
+	}
 	needRead := path != "" && study.ClaudeCanRead(path)
 	dir := filepath.Dir(path)
 	if path == "" {
@@ -122,6 +132,9 @@ func (a *App) runChatTurn(ctx context.Context, jobID, sessionID, message string)
 
 	first := strings.TrimSpace(s.ClaudeSessionID) == ""
 	prompt := study.ChatPrompt(path, name, message, first)
+	if first && note != "" {
+		prompt = note + "\n\n" + prompt
+	}
 	if first && path != "" && !needRead && fileID != 0 {
 		// Office formats: Claude Code cannot open them, so inline the text
 		// NUSSync already extracted for FTS.

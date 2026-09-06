@@ -379,8 +379,16 @@ func (a *App) studySources(fileIDs []int) ([]study.Source, string, []string, err
 			s.Path = ""
 		}
 		if s.Path != "" {
-			s.Readable = study.ClaudeCanRead(s.Path)
+			// Many lecture PDFs cannot be opened by the Read tool as they sit
+			// on disk; Resolve hands back a normalised copy (or a text extract)
+			// from the study cache instead. Page count still comes from the
+			// original, which is the document the student sees.
 			s.Pages = study.PageCount(s.Path)
+			p := study.Resolve(s.Path, id, func() string {
+				txt, _ := a.st.StudyFileText(id)
+				return txt
+			})
+			s.Path, s.Readable, s.Note = p.Path, p.Readable, p.Note
 			d := filepath.Dir(s.Path)
 			if !seen[d] {
 				seen[d] = true
