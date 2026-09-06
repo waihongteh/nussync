@@ -892,3 +892,8 @@ authors + "et al.", `year · venue|preprint · N citations`, links, 1077 bytes /
 `/help` shows all ten commands; `/download 99` in a *fresh process* answered
 "the last list had 5 entries", proving the kv-backed numbering persists.
 `go build/vet/test ./...` and `gofmt -l .` clean.
+- Dead end / bug 2026-09-06: UpsertGrade reset `notified=0` on every sync
+  (unchanged grades re-sent to Telegram on each restart). Fixed with a
+  CASE in the upsert; plus first-run backlog suppression keyed
+  `notify_backlog_v2` (the older `notify_bootstrapped` key was already set
+  on this machine, so a new key was required).
