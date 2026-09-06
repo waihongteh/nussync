@@ -357,6 +357,14 @@ func (s *Store) MarkAnnouncementRead(id int) error {
 	return err
 }
 
+// MarkAllAnnouncementsRead flags every announcement as read in the UI.
+func (s *Store) MarkAllAnnouncementsRead() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`UPDATE announcements SET read=1 WHERE read=0`)
+	return err
+}
+
 // MarkAnnouncementNotified flags an announcement as pushed.
 func (s *Store) MarkAnnouncementNotified(id int) error {
 	s.mu.Lock()

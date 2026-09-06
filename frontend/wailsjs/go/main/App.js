@@ -66,8 +66,16 @@ export function GetDueFlashcards(arg1) {
   return window['go']['main']['App']['GetDueFlashcards'](arg1);
 }
 
+export function GetFileInfo(arg1) {
+  return window['go']['main']['App']['GetFileInfo'](arg1);
+}
+
 export function GetFilePageCount(arg1) {
   return window['go']['main']['App']['GetFilePageCount'](arg1);
+}
+
+export function GetFileText(arg1, arg2) {
+  return window['go']['main']['App']['GetFileText'](arg1, arg2);
 }
 
 export function GetGrades() {

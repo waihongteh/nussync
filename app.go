@@ -16,6 +16,7 @@ import (
 
 	"nussync/internal/canvas"
 	"nussync/internal/config"
+	"nussync/internal/index"
 	"nussync/internal/notify"
 	"nussync/internal/store"
 	"nussync/internal/sync"
@@ -305,6 +306,57 @@ func (a *App) Search(query string, courseID int) ([]SearchHit, error) {
 	return out, nil
 }
 
+// GetFileInfo returns one file's metadata, for the in-app viewer header.
+func (a *App) GetFileInfo(fileID int) (FileNode, error) {
+	if a.st == nil {
+		return FileNode{}, errors.New("not initialised")
+	}
+	f, ok, err := a.st.FileByID(fileID)
+	if err != nil {
+		return FileNode{}, err
+	}
+	if !ok {
+		return FileNode{}, fmt.Errorf("file %d not in the library", fileID)
+	}
+	return toFileNode(f, a.st.FeedSeenAt()), nil
+}
+
+// GetFileText returns the extracted plain text of a file, capped at maxChars
+// (<=0 means no cap). It is what the viewer shows for formats the WebView
+// cannot render itself — pptx/docx/xlsx — and comes from the FTS index, falling
+// back to a live extraction when the file has not been indexed yet.
+func (a *App) GetFileText(fileID int, maxChars int) (string, error) {
+	if a.st == nil {
+		return "", errors.New("not initialised")
+	}
+	f, ok, err := a.st.FileByID(fileID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("file %d not in the library", fileID)
+	}
+	text, _ := a.st.StudyFileText(fileID)
+	if strings.TrimSpace(text) == "" {
+		if !index.Supported(f.AbsPath) {
+			return "", fmt.Errorf("no text preview for %s", f.Name)
+		}
+		text = index.Extract(f.AbsPath)
+	}
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("no text could be extracted from %s", f.Name)
+	}
+	if maxChars > 0 && len(text) > maxChars {
+		// Trim back to a rune boundary so the JSON stays valid UTF-8.
+		cut := maxChars
+		for cut > 0 && text[cut]&0xC0 == 0x80 {
+			cut--
+		}
+		text = text[:cut] + "\n…"
+	}
+	return text, nil
+}
+
 // OpenFile opens a local file with the OS default application.
 func (a *App) OpenFile(path string) error {
 	if strings.TrimSpace(path) == "" {
@@ -580,6 +632,14 @@ func (a *App) MarkAnnouncementRead(id int) error {
 		return errors.New("not initialised")
 	}
 	return a.st.MarkAnnouncementRead(id)
+}
+
+// MarkAllAnnouncementsRead flags every announcement as read.
+func (a *App) MarkAllAnnouncementsRead() error {
+	if a.st == nil {
+		return errors.New("not initialised")
+	}
+	return a.st.MarkAllAnnouncementsRead()
 }
 
 // GetGrades lists graded submissions, newest first.

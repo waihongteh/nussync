@@ -2143,6 +2143,11 @@ export const mockAPI: AppAPI = {
     await delay(null, 30);
   },
 
+  MarkAllAnnouncementsRead: async () => {
+    for (const a of ANNOUNCEMENTS) a.Read = true;
+    await delay(null, 60);
+  },
+
   GetGrades: async () => delay(GRADES.map((g) => ({ ...g }))),
 
   GetSettings: async () => ({ ...settings, ReminderLadder: [...settings.ReminderLadder], SkipExts: [...settings.SkipExts] }),

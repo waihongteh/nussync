@@ -6,6 +6,7 @@ require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3
 	github.com/energye/systray v1.0.3
 	github.com/ledongthuc/pdf v0.0.0-20260903153007-b3c860c23753
+	github.com/pdfcpu/pdfcpu v0.15.0
 	github.com/wailsapp/wails/v2 v2.15.0
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.58.0
@@ -31,7 +32,6 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-runewidth v0.0.27 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/pdfcpu/pdfcpu v0.15.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

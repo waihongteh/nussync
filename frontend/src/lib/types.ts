@@ -430,6 +430,7 @@ export interface AppAPI {
   GetDeadlines(): Promise<Deadline[]>;
   GetAnnouncements(limit: number): Promise<Announcement[]>;
   MarkAnnouncementRead(id: number): Promise<void>;
+  MarkAllAnnouncementsRead(): Promise<void>;
   GetGrades(): Promise<Grade[]>;
   GetSettings(): Promise<Settings>;
   SaveSettings(s: Settings): Promise<void>;

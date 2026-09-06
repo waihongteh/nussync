@@ -34,7 +34,11 @@ export function GetDeadlines():Promise<Array<main.Deadline>>;
 
 export function GetDueFlashcards(arg1:number):Promise<Array<main.Flashcard>>;
 
+export function GetFileInfo(arg1:number):Promise<main.FileNode>;
+
 export function GetFilePageCount(arg1:number):Promise<number>;
+
+export function GetFileText(arg1:number,arg2:number):Promise<string>;
 
 export function GetGrades():Promise<Array<main.Grade>>;
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../api';
+  import { markAllAnnouncementsRead } from '../announceActions';
   import {
     courseByID,
     flatFiles,
@@ -84,6 +85,14 @@
         selectedCourseID.set(0);
         navigate('files');
       },
+    },
+    {
+      key: 'cmd:mark-announcements',
+      kind: 'command' as const,
+      label: 'Mark all announcements read',
+      hint: 'Action',
+      icon: 'announcements',
+      run: () => void markAllAnnouncementsRead(),
     },
     {
       key: 'cmd:play-run',

@@ -5,6 +5,7 @@
   import type { PetMode } from '../pet';
 
   import { courses, loadCourses, settings, theme, toast } from '../stores';
+  import { hideNonAcademic } from '../courseOrder';
   import type { Settings, StudyStatus, TelegramStatus } from '../types';
   import { durLabel, lsGet, lsSet, parseDurLabel } from '../util';
 
@@ -219,6 +220,12 @@
     }
   }
 
+  /** Sidebar-only: hidden courses keep syncing and stay in Files/Deadlines. */
+  function hideNonAcademicCourses() {
+    const n = hideNonAcademic($courses);
+    toast(n === 0 ? 'No non-academic courses to hide' : `Hid ${n} course${n === 1 ? '' : 's'} from the sidebar`, n === 0 ? 'info' : 'success');
+  }
+
   async function toggleCourse(id: number, enabled: boolean) {
     try {
       await api.setCourseEnabled(id, enabled);
@@ -419,6 +426,19 @@
                 spellcheck="false"
               />
             </div>
+          </div>
+
+          <div class="field">
+            <span class="lbl">Sidebar</span>
+            <div class="with-btn">
+              <button class="btn" type="button" onclick={hideNonAcademicCourses}>
+                <Icon name="eyeOff" size={13} /> Hide non-academic courses
+              </button>
+            </div>
+            <span class="help">
+              Collapses courses with no term (or “Non-Academic”) under the sidebar’s Hidden row. They keep
+              syncing and still show in Files and Deadlines.
+            </span>
           </div>
 
           <div class="field">

@@ -162,3 +162,25 @@ NotifyDesktop bool   // default true
 Hotkey        string // default "ctrl+shift+n"; "" disables
 ```
 Both round-trip through `GetSettings`/`SaveSettings` like every other field.
+
+---
+
+## 6. Mark all announcements read
+
+```go
+MarkAllAnnouncementsRead() error   // store: UPDATE announcements SET read=1 WHERE read=0
+```
+
+Bound on `App`, backed by `store.MarkAllAnnouncementsRead`. Emits nothing — the
+caller updates the `announcements` store locally, and `unreadAnnouncements`
+(derived) falls to 0 with it. Exposed in the UI as the Announcements header
+button (disabled at 0 unread) and the palette command
+"Mark all announcements read".
+
+### Sidebar course order / hiding (frontend only)
+
+No backend surface. `nussync.courses.order` (array of course ids) and
+`nussync.courses.hidden` (array of course ids) in localStorage, owned by
+`frontend/src/lib/courseOrder.ts`. Unknown ids sort after the saved order in
+backend order. Hidden courses still sync and still appear in Files, Deadlines
+and Settings — the flag is presentation only.

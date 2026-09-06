@@ -748,3 +748,15 @@ the WebView2 line, and survives two Ctrl+Shift+N presses.
   `nussync.pet.prefs`, position fractions in `nussync.pet.pos`; SVG extracted to
   `components/PetSprite.svelte`, non-dock modes render in `components/PetOverlay.svelte`
   (fixed layer, `pointer-events:none`, z-index 30 = below chat 45 / palette 150 / toasts 200).
+- Done 2026-09-06: Deadlines sidebar badge now counts `!Submitted` locally in
+  `Sidebar.svelte` (was `upcomingCount`, which dropped overdue-unsubmitted).
+- Done 2026-09-06: `MarkAllAnnouncementsRead` (app.go + store) with an
+  Announcements header button and a palette command, both via the shared
+  `lib/announceActions.ts`; documented in docs/CONTRACT_FEATURES.md §6.
+- Done 2026-09-06: sidebar course order/hiding in `lib/courseOrder.ts`
+  (localStorage `nussync.courses.order` / `.hidden`, no backend surface) —
+  pointer-event drag (150ms hold or hover grip, ROW pitch 28px), right-click
+  ContextMenu (hide / move to top / open in Canvas), collapsed "Hidden (n)"
+  row, Alt+↑/↓ on a focused row, and a Settings → Sync "Hide non-academic
+  courses" quick action. Hidden is presentation only: those courses still sync
+  and still appear in Files/Deadlines/Settings.

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, errMsg } from '../api';
+  import { markAllAnnouncementsRead } from '../announceActions';
   import Icon from '../components/Icon.svelte';
   import { announcements, openExternal, toast } from '../stores';
   import { relTime, sanitizeHTML } from '../util';
@@ -48,13 +49,26 @@
   }
 
   const unread = $derived($announcements.filter((a) => !a.Read).length);
+
+  let markingAll = $state(false);
+
+  async function markAllRead() {
+    markingAll = true;
+    await markAllAnnouncementsRead();
+    markingAll = false;
+  }
 </script>
 
 <div class="view">
   <div class="view-narrow">
     <header class="head">
-      <h1 class="page-title">Announcements</h1>
-      <p class="muted sub">{$announcements.length} posts · {unread} unread</p>
+      <div class="head-text">
+        <h1 class="page-title">Announcements</h1>
+        <p class="muted sub">{$announcements.length} posts · {unread} unread</p>
+      </div>
+      <button class="btn sm" disabled={unread === 0 || markingAll} onclick={markAllRead}>
+        <Icon name="check" size={12} /> Mark all read
+      </button>
     </header>
 
     <div class="card list">
@@ -92,7 +106,15 @@
 
 <style>
   .head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
     margin-bottom: 20px;
+  }
+
+  .head-text {
+    min-width: 0;
   }
 
   .sub {

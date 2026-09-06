@@ -89,6 +89,7 @@ export const api = {
   getDeadlines: (): Promise<Deadline[]> => call('GetDeadlines'),
   getAnnouncements: (limit: number): Promise<Announcement[]> => call('GetAnnouncements', limit),
   markAnnouncementRead: (id: number): Promise<void> => call('MarkAnnouncementRead', id),
+  markAllAnnouncementsRead: (): Promise<void> => call('MarkAllAnnouncementsRead'),
   getGrades: (): Promise<Grade[]> => call('GetGrades'),
   getSettings: (): Promise<Settings> => call('GetSettings'),
   saveSettings: (s: Settings): Promise<void> => call('SaveSettings', s),
