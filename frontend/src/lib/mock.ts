@@ -2128,7 +2128,7 @@ async function searchPapersMock(
  * Seeded so the viewer's right rail and the export have something to show in
  * `npm run dev`; the rects are plausible line boxes on an A4 page.
  */
-let highlightSeq = 2;
+let highlightSeq = 3;
 const HIGHLIGHTS: Highlight[] = [
   {
     ID: 1,
@@ -2138,6 +2138,7 @@ const HIGHLIGHTS: Highlight[] = [
     Text: 'A Markov decision process is defined by states, actions, transitions and rewards.',
     Color: 'yellow',
     Note: 'Definition to memorise.',
+    Kind: 'highlight',
     CreatedAt: new Date(Date.now() - 86_400_000).toISOString(),
     UpdatedAt: new Date(Date.now() - 86_400_000).toISOString(),
   },
@@ -2152,8 +2153,22 @@ const HIGHLIGHTS: Highlight[] = [
     Text: 'Value iteration converges because the Bellman operator is a contraction.',
     Color: 'green',
     Note: '',
+    Kind: 'highlight',
     CreatedAt: new Date(Date.now() - 3_600_000).toISOString(),
     UpdatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+  },
+  {
+    ID: 3,
+    FileID: ALL_FILES.find((f) => f.Name.toLowerCase().endsWith('.pdf'))?.ID ?? 0,
+    Page: 1,
+    // A note box: exactly one rect, roughly 220x90 px on an A4 page.
+    Rects: [{ X: 0.62, Y: 0.14, W: 0.28, H: 0.09 }],
+    Text: 'Ask in tutorial: why is the discount factor strictly < 1?',
+    Color: 'yellow',
+    Note: '',
+    Kind: 'note',
+    CreatedAt: new Date(Date.now() - 1_800_000).toISOString(),
+    UpdatedAt: new Date(Date.now() - 1_800_000).toISOString(),
   },
 ];
 
@@ -2784,14 +2799,15 @@ export const mockAPI: AppAPI = {
     if (!h.Rects?.length) throw new Error('highlight has no rectangles');
     const now = new Date().toISOString();
     const color = ['yellow', 'green', 'blue', 'pink'].includes(h.Color) ? h.Color : 'yellow';
+    const kind = h.Kind === 'note' ? 'note' : 'highlight';
     if (h.ID) {
       const i = HIGHLIGHTS.findIndex((x) => x.ID === h.ID);
       if (i < 0) throw new Error('no such highlight');
-      HIGHLIGHTS[i] = { ...HIGHLIGHTS[i], ...h, Color: color, UpdatedAt: now };
+      HIGHLIGHTS[i] = { ...HIGHLIGHTS[i], ...h, Color: color, Kind: kind, UpdatedAt: now };
       localEmitter.emit('highlights:updated', { FileID: h.FileID });
       return { ...HIGHLIGHTS[i] };
     }
-    const saved: Highlight = { ...h, ID: ++highlightSeq, Color: color, CreatedAt: now, UpdatedAt: now };
+    const saved: Highlight = { ...h, ID: ++highlightSeq, Color: color, Kind: kind, CreatedAt: now, UpdatedAt: now };
     HIGHLIGHTS.push(saved);
     localEmitter.emit('highlights:updated', { FileID: h.FileID });
     return { ...saved };
@@ -2821,7 +2837,12 @@ export const mockAPI: AppAPI = {
         page = h.Page;
         out.push(`## Page ${page}`, '');
       }
-      out.push(`> ${h.Text.split(/\s+/).filter(Boolean).join(' ')}`, '');
+      const text = h.Text.split(/\s+/).filter(Boolean).join(' ');
+      if (h.Kind === 'note') {
+        out.push(`\u{1F4DD} Note (p. ${h.Page}): ${text || '(empty)'}`, '');
+        continue;
+      }
+      out.push(`> ${text}`, '');
       if (h.Note.trim()) out.push(h.Note.trim(), '');
     }
     return `${out.join('\n')}\n`;

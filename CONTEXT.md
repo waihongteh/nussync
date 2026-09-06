@@ -1100,7 +1100,7 @@ only — never backend settings) plus `resetLayout()`. Keys are namespaced
   CSS transitions and ResizeObserver callbacks appear frozen until a screenshot
   forces a frame, and `resize_window` does not always fire a `resize` event —
   dispatch one manually when testing width-dependent logic.
-- Queued: PDF text-box annotations (double-click blank area; move/resize/colour; Kind column on highlights table; undo stack; rail + export).
+- 2026-09-06: PDF text boxes ship as a second `Highlight.Kind` ("note") on the same table, stack and rail — double-click blank space (never over a text-layer span: `caretRangeFromPoint`'s span must not contain the point, or every point on the page reads as text) makes a 220x90 CSS-px box, normalised like any rect so it scales with zoom; move/resize record one command on pointerup, typing coalesces. Deleting or Esc-blurring a box must hand focus back to `.pscroll`, or Ctrl+Z fires on `<body>` and the undo is unreachable.
 - 2026-09-06: PDF highlight undo/redo lives in `frontend/src/lib/highlightHistory.ts` —
   a per-file command stack (cap 100, cleared on file change) of plain-data
   `add`/`delete`/`update` commands driven by hooks the viewer supplies, with note

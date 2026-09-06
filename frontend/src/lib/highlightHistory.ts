@@ -27,6 +27,13 @@ export const HISTORY_CAP = 100;
 /** Note edits closer together than this fold into one undo step. */
 export const NOTE_COALESCE_MS = 1500;
 
+/** "highlight" / "highlights", or "text box" / "text boxes" for a note command. */
+function noun(items: Highlight[], n: number): string {
+  const note = items.every((h) => h.Kind === 'note');
+  if (note) return n > 1 ? 'text boxes' : 'text box';
+  return n > 1 ? 'highlights' : 'highlight';
+}
+
 /** What a command needs the viewer to do. All of these must update local state. */
 export interface HistoryHooks {
   /** Insert a highlight (ID is ignored / sent as 0) and return the stored row. */
@@ -46,14 +53,14 @@ type Cmd =
   | { type: 'add'; label: string; items: Highlight[] }
   /** One or more highlights removed together. */
   | { type: 'delete'; label: string; items: Highlight[] }
-  /** A colour or note change on a single highlight. */
+  /** A colour, note, text, or geometry change on a single highlight. */
   | {
       type: 'update';
       label: string;
       id: number;
       before: Partial<Highlight>;
       after: Partial<Highlight>;
-      /** Note edits coalesce; colour changes do not. */
+      /** Typed text (a note or a text box's body) coalesces; nothing else does. */
       note: boolean;
       at: number;
     };
@@ -130,7 +137,7 @@ export class HighlightHistory {
     if (!items.length) return;
     this.#push({
       type: 'add',
-      label: items.length > 1 ? `Add ${items.length} highlights` : 'Add highlight',
+      label: items.length > 1 ? `Add ${items.length} ${noun(items, 2)}` : `Add ${noun(items, 1)}`,
       items: items.map((h) => ({ ...h })),
     });
   }
@@ -140,22 +147,24 @@ export class HighlightHistory {
     if (!items.length) return;
     this.#push({
       type: 'delete',
-      label: items.length > 1 ? `Delete ${items.length} highlights` : 'Delete highlight',
+      label: items.length > 1 ? `Delete ${items.length} ${noun(items, 2)}` : `Delete ${noun(items, 1)}`,
       items: items.map((h) => ({ ...h })),
     });
   }
 
   /**
-   * Record a colour or note change. Consecutive note edits on the same
-   * highlight within NOTE_COALESCE_MS fold into the pending command, keeping
-   * its original `before`, so one undo restores the note as it was before the
-   * user started typing.
+   * Record a change to one highlight: colour, note, a text box's body or its
+   * geometry. Consecutive *typed* edits (`opts.note`) on the same highlight
+   * within NOTE_COALESCE_MS fold into the pending command, keeping its
+   * original `before`, so one undo restores the text as it was before the user
+   * started typing. A move or a resize passes its own `opts.label` and is one
+   * step each — the viewer records it on pointerup, not per pointermove.
    */
   recordUpdate(
     id: number,
     before: Partial<Highlight>,
     after: Partial<Highlight>,
-    opts: { note?: boolean } = {},
+    opts: { note?: boolean; label?: string } = {},
   ): void {
     const note = !!opts.note;
     const now = Date.now();
@@ -176,7 +185,7 @@ export class HighlightHistory {
     }
     this.#push({
       type: 'update',
-      label: note ? 'Edit note' : 'Change colour',
+      label: opts.label ?? (note ? 'Edit note' : 'Change colour'),
       id,
       before: { ...before },
       after: { ...after },

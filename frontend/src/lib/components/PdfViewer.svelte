@@ -9,10 +9,17 @@
    * canvas, which is what every feature here is built on.
    *
    * Layout per page: <canvas> (z0) / highlight boxes (z1, multiply-blended) /
-   * find matches (z1) / .textLayer (z2, transparent text, selectable). All
-   * overlays are pointer-events:none — clicks are hit-tested against the
-   * highlight rectangles in JS instead, because the text spans sit on top and
-   * would otherwise swallow them.
+   * find matches (z1) / .textLayer (z2, transparent text, selectable) / note
+   * boxes (z3). Every overlay but the note layer is pointer-events:none —
+   * clicks are hit-tested against the highlight rectangles in JS instead,
+   * because the text spans sit on top and would otherwise swallow them. Note
+   * boxes have to take real clicks (they contain a textarea), so the *layer*
+   * stays pointer-events:none and only the boxes themselves opt back in.
+   *
+   * Two kinds of annotation share one table and one undo stack (Highlight.Kind):
+   * a "highlight" marks text; a "note" is a free-floating text box created by
+   * double-clicking blank space, with its one Rect as the box and the typed
+   * content in Text.
    *
    * Highlight geometry is stored normalised 0..1 against the page box, so a
    * highlight made at 175% renders correctly at 60%.
@@ -22,6 +29,7 @@
    * store is capped at 2x CSS pixels — a 100-page deck on a 4K display would
    * otherwise allocate gigabytes.
    */
+  import { tick } from 'svelte';
   import { api, errMsg, on } from '../api';
   import { askChat, toast } from '../stores';
   import { HighlightHistory } from '../highlightHistory';
@@ -68,6 +76,7 @@
   // ------------------------------------------------------------- constants
 
   const COLOR_KEY = 'nussync.viewer.hlColor';
+  const NOTE_COLOR_KEY = 'nussync.viewer.noteColor';
   const RAIL_KEY = 'nussync.viewer.hlRail';
 
   /** Palette. Kept light: they are multiply-blended over white paper. */
@@ -78,6 +87,16 @@
     pink: '#ffaecb',
   };
   const COLOR_NAMES = Object.keys(COLORS);
+
+  /**
+   * A new text box, in CSS px at the current zoom — converted to page-normalised
+   * units on creation so it scales with the page like everything else. The
+   * minimums are re-derived from the live page box on every resize move.
+   */
+  const NOTE_W = 220;
+  const NOTE_H = 90;
+  const NOTE_MIN_W = 120;
+  const NOTE_MIN_H = 48;
 
   const MIN_SCALE = 0.5;
   const MAX_SCALE = 3;
@@ -106,6 +125,10 @@
 
   let highlights = $state<Highlight[]>([]);
   let lastColor = $state(lsGet<string>(COLOR_KEY, 'yellow'));
+  /** Text boxes remember their own last colour, so marking text stays yellow. */
+  let lastNoteColor = $state(lsGet<string>(NOTE_COLOR_KEY, 'yellow'));
+  /** Id of the note box that has focus, for the selected ring. */
+  let activeNote = $state(0);
   let highlighterOn = $state(false);
   let railOpen = $state(lsGet<boolean>(RAIL_KEY, false));
 
@@ -169,8 +192,18 @@
     return sizes[n] ?? baseSize;
   }
 
+  /** Marks on a page. Text boxes live in their own layer — see notesFor. */
   function hlFor(n: number) {
-    return highlights.filter((h) => h.Page === n);
+    return highlights.filter((h) => h.Page === n && h.Kind !== 'note');
+  }
+
+  function notesFor(n: number) {
+    return highlights.filter((h) => h.Page === n && h.Kind === 'note');
+  }
+
+  /** A note's box. Stored as the single rect; a malformed row falls back sanely. */
+  function noteRect(h: Highlight): Rect {
+    return h.Rects[0] ?? { X: 0.1, Y: 0.1, W: 0.3, H: 0.12 };
   }
 
   // ------------------------------------------------------------ load / free
@@ -684,6 +717,7 @@
             Text: p.text,
             Color: color,
             Note: '',
+            Kind: 'highlight',
             CreatedAt: '',
             UpdatedAt: '',
           }),
@@ -736,6 +770,10 @@
   }
 
   function onWinPointerMove(e: PointerEvent) {
+    if (noteDrag) {
+      moveNoteDrag(e);
+      return;
+    }
     if (!rightDrag) return;
     if (Math.abs(e.clientX - rightDrag.x) + Math.abs(e.clientY - rightDrag.y) > 4) rightDrag.moved = true;
     if (!rightDrag.moved) return;
@@ -761,6 +799,10 @@
   }
 
   function onWinPointerUp() {
+    if (noteDrag) {
+      endNoteDrag();
+      return;
+    }
     if (!rightDrag) return;
     const moved = rightDrag.moved;
     rightDrag = null;
@@ -787,6 +829,14 @@
       { label: 'Highlight selection', icon: 'highlighter', disabled: !text, run: () => void highlightSelection() },
       { label: 'Ask Claude', icon: 'chat', disabled: !text, run: () => ask(text) },
     ];
+    const spot = notePoint(e.clientX, e.clientY);
+    if (spot) {
+      items.push({
+        label: 'Add text box here',
+        icon: 'note',
+        run: () => void addNote(spot.page, spot.x, spot.y),
+      });
+    }
     menu = { x: e.clientX, y: e.clientY, items };
   }
 
@@ -797,6 +847,186 @@
 
   function ask(quote: string) {
     askChat({ fileID, paperID: '', name }, `About this passage from ${name}:\n\n> ${quote}\n\n`);
+  }
+
+  // ------------------------------------------------------------- text boxes
+
+  /**
+   * Where a new text box would go, or null when the pointer is over glyphs (or
+   * over an existing box). Double-clicking real text has to keep the browser's
+   * native word selection, so "blank" is decided conservatively: the element
+   * under the pointer must not be a text-layer span, nothing may be selected,
+   * and — because `caretRangeFromPoint` happily snaps to the *nearest* run when
+   * the point is over empty space inside the layer — the caret's own span must
+   * not actually contain the point.
+   */
+  function notePoint(x: number, y: number): { page: number; x: number; y: number } | null {
+    if (selectionText()) return null;
+    const el = document.elementFromPoint(x, y) as HTMLElement | null;
+    if (!el || el.closest('.pnote')) return null;
+    const page = el.closest<HTMLElement>('.page');
+    if (!page) return null;
+    if (el.closest('.textLayer') && el.tagName !== 'DIV') return null;
+
+    const node = caretRange(x, y)?.startContainer ?? null;
+    // Only a *text* node counts. Over blank space the caret lands on the layer
+    // div itself, whose box is the whole page — measuring that would reject
+    // every point on the page.
+    if (node && node.nodeType === Node.TEXT_NODE) {
+      const span = node.parentElement;
+      if (span?.closest('.textLayer')) {
+        const b = span.getBoundingClientRect();
+        if (x >= b.left && x <= b.right && y >= b.top && y <= b.bottom) return null;
+      }
+    }
+    const n = Number(page.dataset.page);
+    if (!Number.isFinite(n) || n < 1) return null;
+    return { page: n, x, y };
+  }
+
+  function onPageDblClick(e: MouseEvent, n: number) {
+    const spot = notePoint(e.clientX, e.clientY);
+    if (!spot || spot.page !== n) return; // over text: leave the word selected
+    e.preventDefault();
+    void addNote(n, e.clientX, e.clientY);
+  }
+
+  /** Create a text box centred-ish on the click point and focus it for typing. */
+  async function addNote(n: number, clientX: number, clientY: number) {
+    const el = pageEl(n);
+    if (!el) return;
+    const pr = el.getBoundingClientRect();
+    const w = Math.min(1, NOTE_W / pr.width);
+    const h = Math.min(1, NOTE_H / pr.height);
+    const X = Math.min(Math.max(0, (clientX - pr.left) / pr.width), 1 - w);
+    const Y = Math.min(Math.max(0, (clientY - pr.top) / pr.height), 1 - h);
+    try {
+      const saved = await api.saveHighlight({
+        ID: 0,
+        FileID: fileID,
+        Page: n,
+        Rects: [{ X, Y, W: w, H: h }],
+        Text: '',
+        Color: lastNoteColor,
+        Note: '',
+        Kind: 'note',
+        CreatedAt: '',
+        UpdatedAt: '',
+      });
+      highlights = [...highlights, saved].sort((a, b) => a.Page - b.Page || a.ID - b.ID);
+      history.recordAdd([saved]);
+      activeNote = saved.ID;
+      await tick();
+      noteInputEl(saved.ID)?.focus();
+    } catch (err) {
+      toast(`Could not add the text box: ${errMsg(err)}`, 'error');
+    }
+  }
+
+  function noteInputEl(id: number): HTMLTextAreaElement | null {
+    return scrollEl?.querySelector<HTMLTextAreaElement>(`.pnote[data-id="${id}"] textarea`) ?? null;
+  }
+
+  /**
+   * Move / resize. The pointer moves update only the local array — one history
+   * command (and one backend write) is recorded on pointerup, or a drag across
+   * the page would push a hundred undo steps.
+   */
+  let noteDrag: {
+    id: number;
+    mode: 'move' | 'resize';
+    px: number;
+    py: number;
+    pw: number;
+    ph: number;
+    before: Rect;
+    moved: boolean;
+  } | null = null;
+
+  function startNoteDrag(e: PointerEvent, h: Highlight, mode: 'move' | 'resize') {
+    if (e.button !== 0) return;
+    const el = pageEl(h.Page);
+    if (!el) return;
+    const pr = el.getBoundingClientRect();
+    activeNote = h.ID;
+    noteDrag = {
+      id: h.ID,
+      mode,
+      px: e.clientX,
+      py: e.clientY,
+      pw: pr.width,
+      ph: pr.height,
+      before: { ...noteRect(h) },
+      moved: false,
+    };
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function moveNoteDrag(e: PointerEvent) {
+    const d = noteDrag;
+    if (!d) return;
+    const dx = (e.clientX - d.px) / d.pw;
+    const dy = (e.clientY - d.py) / d.ph;
+    if (Math.abs(e.clientX - d.px) + Math.abs(e.clientY - d.py) > 2) d.moved = true;
+    if (!d.moved) return;
+    const b = d.before;
+    let next: Rect;
+    if (d.mode === 'move') {
+      next = {
+        X: Math.min(Math.max(0, b.X + dx), Math.max(0, 1 - b.W)),
+        Y: Math.min(Math.max(0, b.Y + dy), Math.max(0, 1 - b.H)),
+        W: b.W,
+        H: b.H,
+      };
+    } else {
+      const minW = Math.min(NOTE_MIN_W / d.pw, 1);
+      const minH = Math.min(NOTE_MIN_H / d.ph, 1);
+      next = {
+        X: b.X,
+        Y: b.Y,
+        W: Math.min(Math.max(minW, b.W + dx), 1 - b.X),
+        H: Math.min(Math.max(minH, b.H + dy), 1 - b.Y),
+      };
+    }
+    highlights = highlights.map((x) => (x.ID === d.id ? { ...x, Rects: [next] } : x));
+    e.preventDefault();
+  }
+
+  function endNoteDrag() {
+    const d = noteDrag;
+    noteDrag = null;
+    if (!d || !d.moved) return;
+    const h = highlights.find((x) => x.ID === d.id);
+    if (!h) return;
+    const after = noteRect(h);
+    if (after.X === d.before.X && after.Y === d.before.Y && after.W === d.before.W && after.H === d.before.H) {
+      return;
+    }
+    void patch(h, { Rects: [after] }, {
+      before: { Rects: [d.before] },
+      label: d.mode === 'move' ? 'Move text box' : 'Resize text box',
+    });
+  }
+
+  /** Esc and Ctrl+Enter both just blur — the text is already saved by then. */
+  function onNoteKey(e: KeyboardEvent) {
+    if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
+      e.preventDefault();
+      e.stopPropagation();
+      flushNote();
+      (e.currentTarget as HTMLTextAreaElement).blur();
+      // Hand focus back to the scroller rather than <body>, or the viewer's own
+      // shortcuts (Ctrl+Z, Ctrl+F) would count as fired outside it.
+      scrollEl?.focus({ preventScroll: true });
+    }
+  }
+
+  function recolourNote(h: Highlight, color: string) {
+    lastNoteColor = color;
+    lsSet(NOTE_COLOR_KEY, color);
+    void patch(h, { Color: color }, { label: 'Change text box colour' });
   }
 
   // -------------------------------------------------------- highlight editing
@@ -827,7 +1057,7 @@
   async function patch(
     h: Highlight,
     changes: Partial<Highlight>,
-    opts: { note?: boolean; before?: Partial<Highlight> } = {},
+    opts: { note?: boolean; before?: Partial<Highlight>; label?: string } = {},
   ) {
     // Snapshot the fields being changed so undo can put them back.
     const before: Partial<Highlight> =
@@ -835,52 +1065,76 @@
       Object.fromEntries(Object.keys(changes).map((k) => [k, (h as any)[k]]));
     try {
       await applyPatch(h.ID, changes);
-      history.recordUpdate(h.ID, before, changes, { note: opts.note });
+      history.recordUpdate(h.ID, before, changes, { note: opts.note, label: opts.label });
     } catch (err) {
-      toast(`Could not update the highlight: ${errMsg(err)}`, 'error');
+      toast(`Could not update the ${h.Kind === 'note' ? 'text box' : 'highlight'}: ${errMsg(err)}`, 'error');
       void loadHighlights();
     }
   }
 
   async function remove(h: Highlight) {
     popover = null;
+    const note = h.Kind === 'note';
     const snapshot = { ...h };
     highlights = highlights.filter((x) => x.ID !== h.ID);
+    if (activeNote === h.ID) activeNote = 0;
+    // The delete button we were clicked from is about to be unmounted, which
+    // drops focus to <body> — and then Ctrl+Z counts as fired outside the
+    // viewer and the just-recorded delete cannot be undone from the keyboard.
+    scrollEl?.focus({ preventScroll: true });
     try {
       await api.deleteHighlight(h.ID);
       history.recordDelete([snapshot]);
-      showUndoToast('Highlight removed');
+      showUndoToast(note ? 'Text box removed' : 'Highlight removed');
     } catch (err) {
-      toast(`Could not delete the highlight: ${errMsg(err)}`, 'error');
+      toast(`Could not delete the ${note ? 'text box' : 'highlight'}: ${errMsg(err)}`, 'error');
       void loadHighlights();
     }
   }
 
   /**
-   * Notes save as you type (debounced), not on blur: any click outside the
+   * Typed text saves as you type (debounced), not on blur: any click outside the
    * popover closes it, which unmounts the textarea before a change event
-   * would ever fire — typed notes were silently lost.
+   * would ever fire — typed notes were silently lost. The same path serves a
+   * highlight's Note and a text box's Text; `field` says which.
    */
   let noteTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingNote: { h: Highlight; before: string; text: string } | null = null;
+  let pendingNote: { h: Highlight; field: 'Note' | 'Text'; before: string; text: string } | null = null;
 
   function flushNote() {
     if (noteTimer) clearTimeout(noteTimer);
     noteTimer = null;
     const p = pendingNote;
     pendingNote = null;
-    // `before` is the note as it stood before this burst of typing started —
+    // `before` is the text as it stood before this burst of typing started —
     // the history then coalesces neighbouring bursts into one undo step.
-    if (p) void patch(p.h, { Note: p.text }, { note: true, before: { Note: p.before } });
+    if (p) {
+      void patch(
+        p.h,
+        { [p.field]: p.text },
+        {
+          note: true,
+          before: { [p.field]: p.before },
+          label: p.field === 'Text' ? 'Edit text box' : 'Edit note',
+        },
+      );
+    }
+  }
+
+  function textInput(h: Highlight, field: 'Note' | 'Text', text: string) {
+    // A pending edit to a *different* field or row must land before this one
+    // starts, or its `before` snapshot would be overwritten.
+    if (pendingNote && (pendingNote.h.ID !== h.ID || pendingNote.field !== field)) flushNote();
+    // Optimistic, so the rail and a re-opened popover show it immediately.
+    highlights = highlights.map((x) => (x.ID === h.ID ? { ...x, [field]: text } : x));
+    const keep = pendingNote && pendingNote.h.ID === h.ID ? pendingNote.before : (h[field] as string);
+    pendingNote = { h, field, before: keep, text };
+    if (noteTimer) clearTimeout(noteTimer);
+    noteTimer = setTimeout(flushNote, 400);
   }
 
   function noteInput(h: Highlight, text: string) {
-    // Optimistic, so the rail and a re-opened popover show it immediately.
-    highlights = highlights.map((x) => (x.ID === h.ID ? { ...x, Note: text } : x));
-    const keep = pendingNote && pendingNote.h.ID === h.ID ? pendingNote.before : h.Note;
-    pendingNote = { h, before: keep, text };
-    if (noteTimer) clearTimeout(noteTimer);
-    noteTimer = setTimeout(flushNote, 400);
+    textInput(h, 'Note', text);
   }
 
   $effect(() => () => {
@@ -1271,6 +1525,7 @@
             data-page={n}
             style="width:{sizeOf(n).w * scale}px; height:{sizeOf(n).h * scale}px; --total-scale-factor:{scale}"
             onclick={(e) => onPageClick(e, n)}
+            ondblclick={(e) => onPageDblClick(e, n)}
           >
             <canvas></canvas>
             <div class="hl">
@@ -1292,6 +1547,71 @@
               {/each}
             </div>
             <div class="textLayer"></div>
+            <!-- Above the text layer: a note box owns its clicks (it contains a
+                 textarea), so only the boxes themselves take pointer events. -->
+            <div class="pnotes">
+              {#each notesFor(n) as h (h.ID)}
+                {@const r = noteRect(h)}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <div
+                  class="pnote"
+                  class:sel={activeNote === h.ID}
+                  data-id={h.ID}
+                  style="left:{r.X * 100}%; top:{r.Y * 100}%; width:{r.W * 100}%; height:{r.H * 100}%;
+                         background:{COLORS[h.Color] ?? COLORS.yellow}"
+                  onclick={(e) => e.stopPropagation()}
+                  ondblclick={(e) => e.stopPropagation()}
+                  onpointerdown={(e) => e.stopPropagation()}
+                  oncontextmenu={(e) => e.stopPropagation()}
+                >
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div
+                    class="nbar"
+                    title="Drag to move"
+                    onpointerdown={(e) => startNoteDrag(e, h, 'move')}
+                  >
+                    <span class="ngrip"></span>
+                    <div class="nsw">
+                      {#each COLOR_NAMES as c (c)}
+                        <button
+                          class="nswatch"
+                          class:sel={h.Color === c}
+                          style="background:{COLORS[c]}"
+                          onpointerdown={(e) => e.stopPropagation()}
+                          onclick={() => recolourNote(h, c)}
+                          aria-label="Colour {c}"
+                        ></button>
+                      {/each}
+                    </div>
+                    <button
+                      class="nx"
+                      onpointerdown={(e) => e.stopPropagation()}
+                      onclick={() => void remove(h)}
+                      aria-label="Delete text box"
+                      title="Delete text box">×</button
+                    >
+                  </div>
+                  <textarea
+                    value={h.Text}
+                    placeholder="Type a note…"
+                    spellcheck="false"
+                    aria-label="Text box on page {n}"
+                    oninput={(e) => textInput(h, 'Text', e.currentTarget.value)}
+                    onchange={flushNote}
+                    onfocus={() => (activeNote = h.ID)}
+                    onblur={flushNote}
+                    onkeydown={onNoteKey}
+                  ></textarea>
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <span
+                    class="nresize"
+                    title="Drag to resize"
+                    onpointerdown={(e) => startNoteDrag(e, h, 'resize')}
+                  ></span>
+                </div>
+              {/each}
+            </div>
             <span class="pnum">{n}</span>
           </div>
         {/each}
@@ -1308,7 +1628,10 @@
           </button>
         </header>
         {#if !highlights.length}
-          <p class="empty">Right-drag over text to highlight it. Marks are saved with the file.</p>
+          <p class="empty">
+            Right-drag over text to highlight it, or double-click blank space for a text box. Both
+            are saved with the file.
+          </p>
         {:else}
           <ul>
             {#each highlights as h (h.ID)}
@@ -1316,9 +1639,10 @@
                 <button class="hitem" onclick={() => goTo(h)}>
                   <span class="meta">
                     <span class="cdot" style="background:{COLORS[h.Color] ?? COLORS.yellow}"></span>
+                    {#if h.Kind === 'note'}<Icon name="note" size={10} />{/if}
                     p.{h.Page}
                   </span>
-                  <span class="snip">{h.Text || '(no text)'}</span>
+                  <span class="snip">{h.Text || (h.Kind === 'note' ? '(empty text box)' : '(no text)')}</span>
                   {#if h.Note}<span class="note">{h.Note}</span>{/if}
                 </button>
               </li>
@@ -1625,6 +1949,127 @@
 
   .hlrect.active {
     outline: 1px solid rgb(0 0 0 / 0.35);
+  }
+
+  /* ------------------------------------------------------------ note boxes
+     The layer spans the page and stays click-through; each box opts back in.
+     Everything inside is sized in em off a font-size that tracks
+     --total-scale-factor, so a box drawn at 100% keeps its proportions at
+     300% exactly like the page it is pinned to. */
+  .pnotes {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+
+  .pnote {
+    position: absolute;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgb(0 0 0 / 0.22);
+    border-radius: 3px;
+    box-shadow: 0 2px 6px rgb(0 0 0 / 0.22);
+    color: #1d1f23;
+    font-size: calc(11.5px * var(--total-scale-factor));
+    line-height: 1.4;
+  }
+
+  .pnote.sel {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+
+  .nbar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.15em 0.3em;
+    background: rgb(0 0 0 / 0.09);
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .nbar:active {
+    cursor: grabbing;
+  }
+
+  .ngrip {
+    width: 0.9em;
+    height: 0.5em;
+    border-top: 1px solid rgb(0 0 0 / 0.35);
+    border-bottom: 1px solid rgb(0 0 0 / 0.35);
+    flex: none;
+  }
+
+  .nsw {
+    display: flex;
+    align-items: center;
+    gap: 0.25em;
+    margin-left: auto;
+  }
+
+  .nswatch {
+    width: 0.75em;
+    height: 0.75em;
+    border-radius: 50%;
+    border: 1px solid rgb(0 0 0 / 0.3);
+    padding: 0;
+    flex: none;
+  }
+
+  .nswatch.sel {
+    outline: 1px solid rgb(0 0 0 / 0.6);
+    outline-offset: 1px;
+  }
+
+  .nx {
+    border: 0;
+    background: none;
+    padding: 0 0.15em;
+    font-size: 1.15em;
+    line-height: 1;
+    color: rgb(0 0 0 / 0.5);
+    cursor: pointer;
+  }
+
+  .nx:hover {
+    color: #000;
+  }
+
+  .pnote textarea {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    border: 0;
+    outline: none;
+    resize: none;
+    background: none;
+    padding: 0.35em 0.45em;
+    color: inherit;
+    font: inherit;
+    font-family: inherit;
+  }
+
+  .pnote textarea::placeholder {
+    color: rgb(0 0 0 / 0.35);
+  }
+
+  /* Bottom-right resize grip: two hairlines, the usual corner idiom. */
+  .nresize {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 0.95em;
+    height: 0.95em;
+    cursor: nwse-resize;
+    touch-action: none;
+    background:
+      linear-gradient(135deg, transparent 45%, rgb(0 0 0 / 0.35) 45%, rgb(0 0 0 / 0.35) 55%, transparent 55%),
+      linear-gradient(135deg, transparent 70%, rgb(0 0 0 / 0.35) 70%, rgb(0 0 0 / 0.35) 80%, transparent 80%);
   }
 
   .findrect {

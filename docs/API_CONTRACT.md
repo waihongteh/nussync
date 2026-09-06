@@ -84,7 +84,11 @@ type Highlight struct {
     ID int /*0 on insert*/; FileID int; Page int /*1-based*/
     Rects []Rect /*never empty*/; Text string
     Color string /*"yellow"|"green"|"blue"|"pink"; anything else coerced to yellow*/
-    Note string; CreatedAt string; UpdatedAt string
+    Note string
+    Kind string /*"highlight" (default) | "note"; anything else coerced to "highlight".
+                  A "note" is a free-floating text box: exactly one Rect (the box)
+                  and the typed content in Text.*/
+    CreatedAt string; UpdatedAt string
 }
 ```
 
@@ -132,7 +136,8 @@ SaveHighlight(h Highlight) (Highlight, error)    // ID 0 inserts, otherwise upda
                                                  // as one Highlight per page.
 DeleteHighlight(id int) error                    // unknown id is a no-op
 ExportHighlights(fileID int) (string, error)     // markdown, "## Page N" sections, each
-                                                 // highlight a "> quote" plus its note
+                                                 // highlight a "> quote" plus its note, each
+                                                 // Kind "note" a "📝 Note (p. N): text" line
 SaveTextFile(name, content string) (string, error) // native Save-As; "" if cancelled
 ```
 

@@ -427,7 +427,14 @@ export interface Rect {
 export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink';
 
 /**
- * One saved PDF highlight. A selection spanning pages is stored as one
+ * What a row is. "highlight" marks text on the page; "note" is a free-floating
+ * text box, stored with exactly one Rect (the box) and its typed content in
+ * Text. The backend coerces anything else to "highlight".
+ */
+export type HighlightKind = 'highlight' | 'note';
+
+/**
+ * One saved PDF annotation. A selection spanning pages is stored as one
  * Highlight per page. ID 0 means "not saved yet".
  */
 export interface Highlight {
@@ -439,6 +446,7 @@ export interface Highlight {
   Text: string;
   Color: string;
   Note: string;
+  Kind: HighlightKind;
   CreatedAt: string;
   UpdatedAt: string;
 }

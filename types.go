@@ -186,8 +186,9 @@ type Rect struct {
 	H float64
 }
 
-// Highlight is one saved PDF highlight. A selection that spans pages is stored
-// as one Highlight per page.
+// Highlight is one saved PDF annotation. A text selection that spans pages is
+// stored as one Highlight per page. Kind "note" reuses the same row for a
+// free-floating text box: one Rect (the box) and the typed content in Text.
 type Highlight struct {
 	ID        int
 	FileID    int
@@ -196,6 +197,7 @@ type Highlight struct {
 	Text      string
 	Color     string // "yellow" | "green" | "blue" | "pink"
 	Note      string
+	Kind      string // "highlight" (default) | "note"
 	CreatedAt string
 	UpdatedAt string
 }

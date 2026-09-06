@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS highlights (
   text       TEXT NOT NULL DEFAULT '',
   color      TEXT NOT NULL DEFAULT 'yellow',
   note       TEXT NOT NULL DEFAULT '',
+  kind       TEXT NOT NULL DEFAULT 'highlight',
   created_at TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT ''
 );
@@ -31,24 +32,31 @@ CREATE INDEX IF NOT EXISTS idx_highlights_file ON highlights(file_id, page);
 func (s *Store) MigrateHighlights() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(highlightSchema)
-	return err
+	if _, err := s.db.Exec(highlightSchema); err != nil {
+		return err
+	}
+	// Added 2026-09: text-box annotations share the table. CREATE TABLE IF NOT
+	// EXISTS does nothing for a database that already has the old shape, so the
+	// column is added separately; existing rows default to 'highlight'.
+	return s.addColumn("highlights", "kind", "TEXT NOT NULL DEFAULT 'highlight'")
 }
 
 // Highlight is one stored highlight. Rects is the raw JSON blob.
 type Highlight struct {
-	ID        int
-	FileID    int
-	Page      int
-	Rects     string
-	Text      string
-	Color     string
-	Note      string
+	ID     int
+	FileID int
+	Page   int
+	Rects  string
+	Text   string
+	Color  string
+	Note   string
+	// Kind is "highlight" (a mark over text) or "note" (a free-floating text box).
+	Kind      string
 	CreatedAt string
 	UpdatedAt string
 }
 
-const highlightSelect = `SELECT id, file_id, page, rects, text, color, note,
+const highlightSelect = `SELECT id, file_id, page, rects, text, color, note, kind,
 	created_at, updated_at FROM highlights`
 
 func scanHighlights(rows *sql.Rows) ([]Highlight, error) {
@@ -56,7 +64,7 @@ func scanHighlights(rows *sql.Rows) ([]Highlight, error) {
 	for rows.Next() {
 		var h Highlight
 		if err := rows.Scan(&h.ID, &h.FileID, &h.Page, &h.Rects, &h.Text,
-			&h.Color, &h.Note, &h.CreatedAt, &h.UpdatedAt); err != nil {
+			&h.Color, &h.Note, &h.Kind, &h.CreatedAt, &h.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -100,9 +108,9 @@ func (s *Store) PutHighlight(h Highlight) (Highlight, error) {
 			h.CreatedAt = now
 		}
 		res, err := s.db.Exec(`
-			INSERT INTO highlights(file_id, page, rects, text, color, note, created_at, updated_at)
-			VALUES(?,?,?,?,?,?,?,?)`,
-			h.FileID, h.Page, h.Rects, h.Text, h.Color, h.Note, h.CreatedAt, h.UpdatedAt)
+			INSERT INTO highlights(file_id, page, rects, text, color, note, kind, created_at, updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?)`,
+			h.FileID, h.Page, h.Rects, h.Text, h.Color, h.Note, h.Kind, h.CreatedAt, h.UpdatedAt)
 		if err != nil {
 			return Highlight{}, err
 		}
@@ -115,9 +123,9 @@ func (s *Store) PutHighlight(h Highlight) (Highlight, error) {
 	}
 
 	res, err := s.db.Exec(`
-		UPDATE highlights SET file_id=?, page=?, rects=?, text=?, color=?, note=?, updated_at=?
+		UPDATE highlights SET file_id=?, page=?, rects=?, text=?, color=?, note=?, kind=?, updated_at=?
 		WHERE id=?`,
-		h.FileID, h.Page, h.Rects, h.Text, h.Color, h.Note, h.UpdatedAt, h.ID)
+		h.FileID, h.Page, h.Rects, h.Text, h.Color, h.Note, h.Kind, h.UpdatedAt, h.ID)
 	if err != nil {
 		return Highlight{}, err
 	}

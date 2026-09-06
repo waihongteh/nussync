@@ -61,6 +61,27 @@ func TestHighlightRoundTrip(t *testing.T) {
 		t.Errorf("update not persisted: %+v", got)
 	}
 
+	// Kind round-trips; a row saved without one reads back empty (package main
+	// normalises it to "highlight").
+	box, err := s.PutHighlight(Highlight{FileID: 10, Page: 2, Rects: `[{"X":0.1,"Y":0.1,"W":0.3,"H":0.1}]`,
+		Text: "todo: revise", Color: "yellow", Kind: "note"})
+	if err != nil {
+		t.Fatalf("insert note: %v", err)
+	}
+	if got, ok, err := s.HighlightByID(box.ID); err != nil || !ok || got.Kind != "note" {
+		t.Errorf("kind not persisted: %+v %v %v", got, ok, err)
+	}
+	box.Text = "revised"
+	if _, err := s.PutHighlight(box); err != nil {
+		t.Fatalf("update note: %v", err)
+	}
+	if got, _, _ := s.HighlightByID(box.ID); got.Kind != "note" || got.Text != "revised" {
+		t.Errorf("update dropped kind: %+v", got)
+	}
+	if err := s.DeleteHighlight(box.ID); err != nil {
+		t.Fatalf("delete note: %v", err)
+	}
+
 	// Updating a missing row is an error, deleting one is not.
 	if _, err := s.PutHighlight(Highlight{ID: 9999, FileID: 10, Rects: `[]`}); err == nil {
 		t.Error("update of a missing id should fail")
@@ -73,5 +94,32 @@ func TestHighlightRoundTrip(t *testing.T) {
 	}
 	if hs, _ := s.HighlightsForFile(10); len(hs) != 1 {
 		t.Errorf("after delete: %d rows", len(hs))
+	}
+}
+
+// A database created before the `kind` column exists must gain it on migrate,
+// with the existing rows reading back as plain highlights.
+func TestHighlightsKindMigration(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.db.Exec(`CREATE TABLE highlights (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER NOT NULL,
+		page INTEGER NOT NULL DEFAULT 1, rects TEXT NOT NULL DEFAULT '[]',
+		text TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT 'yellow',
+		note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatalf("legacy table: %v", err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO highlights(file_id, page, text) VALUES(7, 1, 'old')`); err != nil {
+		t.Fatalf("legacy row: %v", err)
+	}
+	if err := s.MigrateHighlights(); err != nil {
+		t.Fatalf("MigrateHighlights: %v", err)
+	}
+	hs, err := s.HighlightsForFile(7)
+	if err != nil || len(hs) != 1 {
+		t.Fatalf("list: %v %v", hs, err)
+	}
+	if hs[0].Kind != "highlight" || hs[0].Text != "old" {
+		t.Errorf("legacy row after migration: %+v", hs[0])
 	}
 }

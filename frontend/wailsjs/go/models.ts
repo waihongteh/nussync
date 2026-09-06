@@ -403,6 +403,7 @@ export namespace main {
 	    Text: string;
 	    Color: string;
 	    Note: string;
+	    Kind: string;
 	    CreatedAt: string;
 	    UpdatedAt: string;
 	
@@ -419,6 +420,7 @@ export namespace main {
 	        this.Text = source["Text"];
 	        this.Color = source["Color"];
 	        this.Note = source["Note"];
+	        this.Kind = source["Kind"];
 	        this.CreatedAt = source["CreatedAt"];
 	        this.UpdatedAt = source["UpdatedAt"];
 	    }

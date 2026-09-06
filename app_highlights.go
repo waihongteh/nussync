@@ -23,6 +23,20 @@ import (
 // to yellow so a stray value cannot render as an invisible swatch.
 var highlightColors = map[string]bool{"yellow": true, "green": true, "blue": true, "pink": true}
 
+// Kinds a row can have. Anything unrecognised (including the empty string a
+// pre-`kind` row or an older frontend sends) reads back as a plain highlight.
+const (
+	KindHighlight = "highlight"
+	KindNote      = "note"
+)
+
+func normHighlightKind(k string) string {
+	if k == KindNote {
+		return KindNote
+	}
+	return KindHighlight
+}
+
 var highlightsInit sync.Once
 var highlightsErr error
 
@@ -57,6 +71,7 @@ func toHighlight(r store.Highlight) Highlight {
 		Text:      r.Text,
 		Color:     r.Color,
 		Note:      r.Note,
+		Kind:      normHighlightKind(r.Kind),
 		CreatedAt: r.CreatedAt,
 		UpdatedAt: r.UpdatedAt,
 	}
@@ -93,6 +108,7 @@ func (a *App) SaveHighlight(h Highlight) (Highlight, error) {
 	if !highlightColors[h.Color] {
 		h.Color = "yellow"
 	}
+	h.Kind = normHighlightKind(h.Kind)
 	if len(h.Rects) == 0 {
 		return Highlight{}, errors.New("highlight has no rectangles")
 	}
@@ -102,7 +118,7 @@ func (a *App) SaveHighlight(h Highlight) (Highlight, error) {
 	}
 	saved, err := a.st.PutHighlight(store.Highlight{
 		ID: h.ID, FileID: h.FileID, Page: h.Page, Rects: string(blob),
-		Text: h.Text, Color: h.Color, Note: h.Note, CreatedAt: h.CreatedAt,
+		Text: h.Text, Color: h.Color, Note: h.Note, Kind: h.Kind, CreatedAt: h.CreatedAt,
 	})
 	if err != nil {
 		return Highlight{}, err
@@ -127,8 +143,9 @@ func (a *App) DeleteHighlight(id int) error {
 	return nil
 }
 
-// ExportHighlights renders a file's highlights as markdown, grouped by page:
-// a block quote of the highlighted text plus the note underneath.
+// ExportHighlights renders a file's annotations as markdown, grouped by page:
+// a block quote of the highlighted text plus the note underneath, and text
+// boxes as a "📝 Note (p. N): ..." line.
 func (a *App) ExportHighlights(fileID int) (string, error) {
 	hs, err := a.GetHighlights(fileID)
 	if err != nil {
@@ -154,6 +171,14 @@ func (a *App) ExportHighlights(fileID int) (string, error) {
 		if h.Page != page {
 			page = h.Page
 			fmt.Fprintf(&b, "## Page %d\n\n", page)
+		}
+		if h.Kind == KindNote {
+			text := strings.TrimSpace(collapseWS(h.Text))
+			if text == "" {
+				text = "(empty)"
+			}
+			fmt.Fprintf(&b, "\U0001F4DD Note (p. %d): %s\n\n", h.Page, text)
+			continue
 		}
 		for _, line := range strings.Split(strings.TrimSpace(collapseWS(h.Text)), "\n") {
 			fmt.Fprintf(&b, "> %s\n", line)
