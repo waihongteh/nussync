@@ -12,9 +12,13 @@ export function ChooseSyncDir():Promise<string>;
 
 export function DeleteChat(arg1:string):Promise<void>;
 
+export function DeleteHighlight(arg1:number):Promise<void>;
+
 export function DownloadPaperPDF(arg1:string):Promise<main.LibraryPaper>;
 
 export function ExportBibTeX(arg1:Array<string>):Promise<string>;
+
+export function ExportHighlights(arg1:number):Promise<string>;
 
 export function GetAnnouncements(arg1:number):Promise<Array<main.Announcement>>;
 
@@ -41,6 +45,8 @@ export function GetFilePageCount(arg1:number):Promise<number>;
 export function GetFileText(arg1:number,arg2:number):Promise<string>;
 
 export function GetGrades():Promise<Array<main.Grade>>;
+
+export function GetHighlights(arg1:number):Promise<Array<main.Highlight>>;
 
 export function GetLibrary(arg1:string):Promise<Array<main.LibraryPaper>>;
 
@@ -112,7 +118,11 @@ export function RevealFile(arg1:string):Promise<void>;
 
 export function ReviewFlashcard(arg1:number,arg2:number):Promise<void>;
 
+export function SaveHighlight(arg1:main.Highlight):Promise<main.Highlight>;
+
 export function SaveSettings(arg1:main.Settings):Promise<void>;
+
+export function SaveTextFile(arg1:string,arg2:string):Promise<string>;
 
 export function Search(arg1:string,arg2:number):Promise<Array<main.SearchHit>>;
 

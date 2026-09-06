@@ -7,21 +7,26 @@
    *   /local/{id}            for anything with a Canvas file id
    *   /local/path?p=<abs>    fallback, allowed only under SyncDir
    *
-   * PDFs go straight into an <iframe>: WebView2 (and the Chromium behind
-   * `wails dev`) has a built-in PDF viewer, which is why the iframe carries no
-   * sandbox attribute — sandboxing disables the plugin and yields a blank pane.
+   * PDFs render in PdfViewer.svelte (PDF.js) by default, because the WebView's
+   * built-in plugin renders into an opaque document with no reachable text
+   * layer — no selection, no quoting, no highlighting. The plugin is still one
+   * click away ("Built-in" / the Engine toggle, persisted in
+   * `nussync.viewer.engine`); that path is a plain <iframe> with no sandbox
+   * attribute, since sandboxing disables the plugin and yields a blank pane.
    * Everything textual is fetched and rendered by us rather than handed to the
    * WebView, so course HTML never executes in the app's own origin. Formats the
    * WebView cannot show at all (pptx/docx/xlsx) fall back to the extracted text
    * the indexer already holds, via GetFileText.
    */
+  import { untrack } from 'svelte';
   import { api, errMsg } from '../api';
   import { courseByID, openChat, openFileNode, setContext, studyFile, toast } from '../stores';
   import type { FileNode } from '../types';
-  import { ext, fmtBytes, fmtDateTime, markdownToHTML } from '../util';
+  import { ext, fmtBytes, fmtDateTime, lsGet, lsSet, markdownToHTML } from '../util';
   import { recordPreview } from '../quest';
   import { viewerFocus } from '../layout';
   import Icon from './Icon.svelte';
+  import PdfViewer from './PdfViewer.svelte';
 
   interface Props {
     file: FileNode | null;
@@ -85,6 +90,20 @@
   }
 
   const crumbText = $derived(crumb || file?.RelPath || file?.Name || '');
+
+  // ------------------------------------------------------------- pdf engine
+
+  const ENGINE_KEY = 'nussync.viewer.engine';
+  /** 'pdfjs' (default, highlights) | 'builtin' (WebView plugin, no text layer). */
+  let engine = $state<'pdfjs' | 'builtin'>(lsGet<'pdfjs' | 'builtin'>(ENGINE_KEY, 'pdfjs'));
+
+  function setEngine(v: 'pdfjs' | 'builtin') {
+    engine = v;
+    lsSet(ENGINE_KEY, v);
+    // The iframe reports its own load; PDF.js manages its own spinner.
+    if (v === 'builtin') loading = true;
+    else loading = false;
+  }
 
   /** How the preview is rendered. */
   type Mode = 'pdf' | 'image' | 'text' | 'markdown' | 'extracted' | 'none';
@@ -171,8 +190,14 @@
       error = 'This file has not been downloaded yet — run a sync first.';
       return;
     }
-    if (m === 'pdf' || m === 'image') {
-      // The <iframe>/<img> loads it; their own handlers flip `loading` off.
+    if (m === 'pdf') {
+      // PdfViewer draws its own spinner; the built-in iframe reports onload.
+      // untrack: flipping the engine must not re-run the whole load effect.
+      loading = untrack(() => engine) === 'builtin';
+      return;
+    }
+    if (m === 'image') {
+      // The <img> loads it; its own handler flips `loading` off.
       loading = true;
       return;
     }
@@ -287,7 +312,17 @@
         </span>
       </div>
       <div class="vactions">
-        {#if mode === 'image'}
+        {#if mode === 'pdf'}
+          <button
+            class="btn sm"
+            onclick={() => setEngine(engine === 'pdfjs' ? 'builtin' : 'pdfjs')}
+            title={engine === 'pdfjs'
+              ? "Switch to the WebView's built-in PDF viewer (no highlighting)"
+              : 'Switch back to the reader with highlighting'}
+          >
+            {engine === 'pdfjs' ? 'Use built-in viewer' : 'Use reader'}
+          </button>
+        {:else if mode === 'image'}
           <button class="btn sm" onclick={() => (actualSize = !actualSize)}>{actualSize ? 'Fit' : '1:1'}</button>
         {:else if mode === 'text' || mode === 'extracted'}
           <button class="btn sm" onclick={() => (wrap = !wrap)}>{wrap ? 'No wrap' : 'Wrap'}</button>
@@ -321,7 +356,11 @@
       </div>
     </header>
 
-    <div class="vbody" class:pad={mode !== 'pdf' && mode !== 'image'}>
+    <div
+      class="vbody"
+      class:pad={mode !== 'pdf' && mode !== 'image'}
+      class:nested={mode === 'pdf' && engine === 'pdfjs'}
+    >
       {#if error}
         <div class="state err">
           <Icon name="alert" size={18} />
@@ -337,7 +376,13 @@
         {/if}
 
         {#if mode === 'pdf'}
-          <iframe class="pdf" class:hide={loading} src="{src}#toolbar=1&view=FitH" title="Preview of {file.Name}" onload={done} onerror={() => failed('PDF')}></iframe>
+          {#if engine === 'pdfjs'}
+            {#key file.ID}
+              <PdfViewer fileID={file.ID} {src} name={file.Name} />
+            {/key}
+          {:else}
+            <iframe class="pdf" class:hide={loading} src="{src}#toolbar=1&view=FitH" title="Preview of {file.Name}" onload={done} onerror={() => failed('PDF')}></iframe>
+          {/if}
         {:else if mode === 'image'}
           <div class="imgwrap" class:actual={actualSize}>
             <img class:hide={loading} src={src} alt={file.Name} onload={done} onerror={() => failed('image')} />
@@ -504,6 +549,17 @@
     position: relative;
     overflow: auto;
     background: var(--bg-subtle);
+  }
+
+  /* PdfViewer owns its own scrolling; a second scrollbar out here would fight it. */
+  .vbody.nested {
+    overflow: hidden;
+    display: flex;
+  }
+
+  .vbody.nested > :global(*) {
+    flex: 1;
+    min-width: 0;
   }
 
   .vbody.pad {

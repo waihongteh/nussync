@@ -18,6 +18,7 @@ import type {
   FileNode,
   Flashcard,
   Grade,
+  Highlight,
   LibraryPaper,
   Overview,
   Paper,
@@ -2121,6 +2122,41 @@ async function searchPapersMock(
 }
 
 
+// ------------------------------------------------------------------ highlights
+
+/**
+ * Seeded so the viewer's right rail and the export have something to show in
+ * `npm run dev`; the rects are plausible line boxes on an A4 page.
+ */
+let highlightSeq = 2;
+const HIGHLIGHTS: Highlight[] = [
+  {
+    ID: 1,
+    FileID: ALL_FILES.find((f) => f.Name.toLowerCase().endsWith('.pdf'))?.ID ?? 0,
+    Page: 1,
+    Rects: [{ X: 0.12, Y: 0.28, W: 0.62, H: 0.022 }],
+    Text: 'A Markov decision process is defined by states, actions, transitions and rewards.',
+    Color: 'yellow',
+    Note: 'Definition to memorise.',
+    CreatedAt: new Date(Date.now() - 86_400_000).toISOString(),
+    UpdatedAt: new Date(Date.now() - 86_400_000).toISOString(),
+  },
+  {
+    ID: 2,
+    FileID: ALL_FILES.find((f) => f.Name.toLowerCase().endsWith('.pdf'))?.ID ?? 0,
+    Page: 2,
+    Rects: [
+      { X: 0.12, Y: 0.44, W: 0.7, H: 0.022 },
+      { X: 0.12, Y: 0.47, W: 0.31, H: 0.022 },
+    ],
+    Text: 'Value iteration converges because the Bellman operator is a contraction.',
+    Color: 'green',
+    Note: '',
+    CreatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    UpdatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+  },
+];
+
 export const mockAPI: AppAPI = {
   GetCourses: () => delay(COURSES.map((c) => ({ ...c }))),
 
@@ -2731,6 +2767,70 @@ export const mockAPI: AppAPI = {
   GetChatMessages: async (sessionID) => {
     await delay(null, 110);
     return CHAT_MESSAGES.filter((m) => m.SessionID === sessionID).map((m) => ({ ...m }));
+  },
+
+  // ------------------------------------------------------------ highlights
+
+  GetHighlights: async (fileID) => {
+    await delay(null, 60);
+    return HIGHLIGHTS.filter((h) => h.FileID === fileID)
+      .sort((a, b) => a.Page - b.Page || a.ID - b.ID)
+      .map((h) => ({ ...h, Rects: h.Rects.map((r) => ({ ...r })) }));
+  },
+
+  SaveHighlight: async (h) => {
+    await delay(null, 70);
+    if (!h.FileID) throw new Error('highlight needs a file id');
+    if (!h.Rects?.length) throw new Error('highlight has no rectangles');
+    const now = new Date().toISOString();
+    const color = ['yellow', 'green', 'blue', 'pink'].includes(h.Color) ? h.Color : 'yellow';
+    if (h.ID) {
+      const i = HIGHLIGHTS.findIndex((x) => x.ID === h.ID);
+      if (i < 0) throw new Error('no such highlight');
+      HIGHLIGHTS[i] = { ...HIGHLIGHTS[i], ...h, Color: color, UpdatedAt: now };
+      localEmitter.emit('highlights:updated', { FileID: h.FileID });
+      return { ...HIGHLIGHTS[i] };
+    }
+    const saved: Highlight = { ...h, ID: ++highlightSeq, Color: color, CreatedAt: now, UpdatedAt: now };
+    HIGHLIGHTS.push(saved);
+    localEmitter.emit('highlights:updated', { FileID: h.FileID });
+    return { ...saved };
+  },
+
+  DeleteHighlight: async (id) => {
+    await delay(null, 50);
+    const i = HIGHLIGHTS.findIndex((x) => x.ID === id);
+    if (i < 0) return;
+    const fileID = HIGHLIGHTS[i].FileID;
+    HIGHLIGHTS.splice(i, 1);
+    localEmitter.emit('highlights:updated', { FileID: fileID });
+  },
+
+  ExportHighlights: async (fileID) => {
+    await delay(null, 60);
+    const hs = HIGHLIGHTS.filter((h) => h.FileID === fileID).sort((a, b) => a.Page - b.Page || a.ID - b.ID);
+    const name = ALL_FILES.find((f) => f.ID === fileID)?.Name ?? `file ${fileID}`;
+    const out = [`# Highlights — ${name}`, ''];
+    if (!hs.length) {
+      out.push('_No highlights yet._');
+      return `${out.join('\n')}\n`;
+    }
+    let page = -1;
+    for (const h of hs) {
+      if (h.Page !== page) {
+        page = h.Page;
+        out.push(`## Page ${page}`, '');
+      }
+      out.push(`> ${h.Text.split(/\s+/).filter(Boolean).join(' ')}`, '');
+      if (h.Note.trim()) out.push(h.Note.trim(), '');
+    }
+    return `${out.join('\n')}\n`;
+  },
+
+  SaveTextFile: async (name, content) => {
+    localEmitter.emit('toast', { Level: 'success', Message: `Saved ${name} (${content.length} chars)` });
+    await delay(null, 40);
+    return `C:\\Users\\you\\Downloads\\${name}`;
   },
 
   DeleteChat: async (sessionID) => {

@@ -22,12 +22,20 @@ export function DeleteChat(arg1) {
   return window['go']['main']['App']['DeleteChat'](arg1);
 }
 
+export function DeleteHighlight(arg1) {
+  return window['go']['main']['App']['DeleteHighlight'](arg1);
+}
+
 export function DownloadPaperPDF(arg1) {
   return window['go']['main']['App']['DownloadPaperPDF'](arg1);
 }
 
 export function ExportBibTeX(arg1) {
   return window['go']['main']['App']['ExportBibTeX'](arg1);
+}
+
+export function ExportHighlights(arg1) {
+  return window['go']['main']['App']['ExportHighlights'](arg1);
 }
 
 export function GetAnnouncements(arg1) {
@@ -80,6 +88,10 @@ export function GetFileText(arg1, arg2) {
 
 export function GetGrades() {
   return window['go']['main']['App']['GetGrades']();
+}
+
+export function GetHighlights(arg1) {
+  return window['go']['main']['App']['GetHighlights'](arg1);
 }
 
 export function GetLibrary(arg1) {
@@ -222,8 +234,16 @@ export function ReviewFlashcard(arg1, arg2) {
   return window['go']['main']['App']['ReviewFlashcard'](arg1, arg2);
 }
 
+export function SaveHighlight(arg1) {
+  return window['go']['main']['App']['SaveHighlight'](arg1);
+}
+
 export function SaveSettings(arg1) {
   return window['go']['main']['App']['SaveSettings'](arg1);
+}
+
+export function SaveTextFile(arg1, arg2) {
+  return window['go']['main']['App']['SaveTextFile'](arg1, arg2);
 }
 
 export function Search(arg1, arg2) {

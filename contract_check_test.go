@@ -74,6 +74,13 @@ func TestContractSignatures(t *testing.T) {
 		_ func(int, string) ([]ChatSession, error)       = a.GetChats
 		_ func(string) ([]ChatMessage, error)            = a.GetChatMessages
 		_ func(string) error                             = a.DeleteChat
+
+		// PDF highlights (docs/API_CONTRACT.md)
+		_ func(int) ([]Highlight, error)       = a.GetHighlights
+		_ func(Highlight) (Highlight, error)   = a.SaveHighlight
+		_ func(int) error                      = a.DeleteHighlight
+		_ func(int) (string, error)            = a.ExportHighlights
+		_ func(string, string) (string, error) = a.SaveTextFile
 	)
 }
 

@@ -24,6 +24,7 @@ import type {
   FileNode,
   Flashcard,
   Grade,
+  Highlight,
   Overview,
   Paper,
   PaperDigest,
@@ -171,6 +172,13 @@ export const api = {
   getChats: (fileID: number, paperID: string): Promise<ChatSession[]> => call('GetChats', fileID, paperID),
   getChatMessages: (sessionID: string): Promise<ChatMessage[]> => call('GetChatMessages', sessionID),
   deleteChat: (sessionID: string): Promise<void> => call('DeleteChat', sessionID),
+
+  // ---------------------------------------------------------- highlights
+  getHighlights: (fileID: number): Promise<Highlight[]> => call('GetHighlights', fileID),
+  saveHighlight: (h: Highlight): Promise<Highlight> => call('SaveHighlight', h),
+  deleteHighlight: (id: number): Promise<void> => call('DeleteHighlight', id),
+  exportHighlights: (fileID: number): Promise<string> => call('ExportHighlights', fileID),
+  saveTextFile: (name: string, content: string): Promise<string> => call('SaveTextFile', name, content),
 };
 
 /**

@@ -176,3 +176,26 @@ type Toast struct {
 	Level   string // "info" | "success" | "error"
 	Message string
 }
+
+// Rect is one highlighted box, normalised 0..1 against the PDF page it sits on
+// (origin top-left), so it survives any zoom level.
+type Rect struct {
+	X float64
+	Y float64
+	W float64
+	H float64
+}
+
+// Highlight is one saved PDF highlight. A selection that spans pages is stored
+// as one Highlight per page.
+type Highlight struct {
+	ID        int
+	FileID    int
+	Page      int // 1-based
+	Rects     []Rect
+	Text      string
+	Color     string // "yellow" | "green" | "blue" | "pink"
+	Note      string
+	CreatedAt string
+	UpdatedAt string
+}

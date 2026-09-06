@@ -78,6 +78,14 @@ type SyncStatus struct {
 }
 type TelegramStatus struct { Configured bool; ChatID string; BotName string /*includes the leading @*/ }
 type Stats struct { Files int; Bytes int64; Courses int; Deadlines int; LastSync string }
+// PDF highlights (frontend components/PdfViewer.svelte).
+type Rect struct { X, Y, W, H float64 } // normalised 0..1 to the page box, origin top-left
+type Highlight struct {
+    ID int /*0 on insert*/; FileID int; Page int /*1-based*/
+    Rects []Rect /*never empty*/; Text string
+    Color string /*"yellow"|"green"|"blue"|"pink"; anything else coerced to yellow*/
+    Note string; CreatedAt string; UpdatedAt string
+}
 ```
 
 ## Methods on App
@@ -114,6 +122,18 @@ PairTelegram() (string, error)                       // waits <=60s for user to 
 SendTestTelegram() error
 ChooseSyncDir() (string, error)                      // native folder dialog; "" if cancelled
 GetStats() (Stats, error)
+
+// PDF highlights. Table `highlights`, created lazily on first use.
+GetHighlights(fileID int) ([]Highlight, error)   // ordered by page, then id
+SaveHighlight(h Highlight) (Highlight, error)    // ID 0 inserts, otherwise updates by
+                                                 // id (CreatedAt is never rewritten);
+                                                 // errors on FileID 0 or empty Rects.
+                                                 // A selection spanning pages is saved
+                                                 // as one Highlight per page.
+DeleteHighlight(id int) error                    // unknown id is a no-op
+ExportHighlights(fileID int) (string, error)     // markdown, "## Page N" sections, each
+                                                 // highlight a "> quote" plus its note
+SaveTextFile(name, content string) (string, error) // native Save-As; "" if cancelled
 ```
 
 Feature bindings added later (what's-new feed, assignment detail, window
@@ -149,6 +169,7 @@ unknown or the file is not on disk, 400 for a malformed id, 405 for non-GET/HEAD
 - `announcements:new` payload []Announcement (only announcements first seen in
   that sync — not everything the Telegram scheduler has yet to send)
 - `toast` payload {Level string /*info|success|error*/; Message string}
+- `highlights:updated` payload {FileID int} (after SaveHighlight/DeleteHighlight)
 
 ## Storage
 - Config: `%APPDATA%/NUSSync/config.json`. On first run, if `.env` in cwd has

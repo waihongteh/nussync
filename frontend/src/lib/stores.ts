@@ -200,6 +200,20 @@ export function openChat(ctx?: Partial<ChatContext>) {
 }
 
 /**
+ * Text the chat composer should be pre-filled with the next time the panel
+ * renders. The Viewer's "Ask Claude" writes the quoted highlight here;
+ * ChatPanel consumes it and clears it back to '' so re-opening the panel does
+ * not resurrect an old quote.
+ */
+export const chatPrefill = writable('');
+
+/** Open the chat on `ctx` with `text` already typed into the composer. */
+export function askChat(ctx: Partial<ChatContext>, text: string) {
+  chatPrefill.set(text);
+  openChat(ctx);
+}
+
+/**
  * File id the Study view should preselect the next time it mounts. Papers sets
  * it before navigating to `study`; Study consumes and clears it.
  */

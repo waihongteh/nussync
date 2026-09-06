@@ -410,6 +410,39 @@ export interface ToastPayload {
   Message: string;
 }
 
+// ----------------------------------------------------------- highlights
+
+/**
+ * One highlighted box, normalised 0..1 against the PDF page it sits on
+ * (origin top-left), so it survives any zoom level.
+ */
+export interface Rect {
+  X: number;
+  Y: number;
+  W: number;
+  H: number;
+}
+
+/** Palette offered by the viewer; the backend coerces anything else to yellow. */
+export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink';
+
+/**
+ * One saved PDF highlight. A selection spanning pages is stored as one
+ * Highlight per page. ID 0 means "not saved yet".
+ */
+export interface Highlight {
+  ID: number;
+  FileID: number;
+  /** 1-based. */
+  Page: number;
+  Rects: Rect[];
+  Text: string;
+  Color: string;
+  Note: string;
+  CreatedAt: string;
+  UpdatedAt: string;
+}
+
 /** Event names emitted by the Go backend. */
 export type AppEvent =
   | 'sync:status'
@@ -422,7 +455,13 @@ export type AppEvent =
   | 'study:progress'
   | 'papers:updated'
   | 'chat:delta'
-  | 'chat:done';
+  | 'chat:done'
+  | 'highlights:updated';
+
+/** `highlights:updated` payload */
+export interface HighlightsUpdated {
+  FileID: number;
+}
 
 /** Typed shape of the bound Go App methods. */
 export interface AppAPI {
@@ -518,6 +557,13 @@ export interface AppAPI {
   GetChats(fileID: number, paperID: string): Promise<ChatSession[]>;
   GetChatMessages(sessionID: string): Promise<ChatMessage[]>;
   DeleteChat(sessionID: string): Promise<void>;
+
+  // --------------------------------------------------------- highlights
+  GetHighlights(fileID: number): Promise<Highlight[]>;
+  SaveHighlight(h: Highlight): Promise<Highlight>;
+  DeleteHighlight(id: number): Promise<void>;
+  ExportHighlights(fileID: number): Promise<string>;
+  SaveTextFile(name: string, content: string): Promise<string>;
 }
 
 // ------------------------------------------------------------------ UI-only

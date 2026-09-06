@@ -19,7 +19,7 @@
    */
   import { api, errMsg, on } from '../api';
   import { chatCollapsed, chatForcedOverlay, toggleChatCollapsed, toggleChatMode } from '../layout';
-  import { chatOpen, currentContext, revealInFiles, toast } from '../stores';
+  import { chatOpen, chatPrefill, currentContext, revealInFiles, toast } from '../stores';
   import type { ChatDelta, ChatDone, ChatMessage, ChatSession, StudyStatus } from '../types';
   import { lsGet, lsSet, markdownToHTML, relTime } from '../util';
   import Icon from './Icon.svelte';
@@ -265,6 +265,23 @@
     if ($chatOpen && !collapsed) {
       queueMicrotask(() => inputEl?.focus());
     }
+  });
+
+  /**
+   * Consume a prefill queued by "Ask Claude" elsewhere (the PDF viewer's
+   * highlight popover). Appended rather than replacing, so a half-typed
+   * question survives, and cleared immediately: the store is a one-shot
+   * handoff, not state.
+   */
+  $effect(() => {
+    const queued = $chatPrefill;
+    if (!queued) return;
+    chatPrefill.set('');
+    draft = draft.trim() ? `${draft.replace(/\s+$/, '')}\n\n${queued}` : queued;
+    queueMicrotask(() => {
+      inputEl?.focus();
+      inputEl?.setSelectionRange(draft.length, draft.length);
+    });
   });
 </script>
 

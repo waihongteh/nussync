@@ -117,6 +117,75 @@ unsubmitted assignments/quizzes, plus announcements/grades notifications.
   WebView the iframe's `contentDocument.contentType` is `application/pdf` with
   `readyState: complete`, i.e. the built-in viewer really rendered it.
 
+## Viewer: PDF.js reader + highlights (2026-09-06)
+The WebView's built-in PDF plugin renders into an opaque document — **no
+reachable text layer, so no selection, no quoting, no highlighting**. That is
+why `components/PdfViewer.svelte` (pdf.js 5.6.x) is now the default engine for
+PDFs; the plugin stays one click away ("Use built-in viewer" in the Viewer
+header, persisted as `nussync.viewer.engine`, `'pdfjs' | 'builtin'`). Do not
+"simplify" back to the iframe.
+- **pdf.js is imported lazily** (`import('pdfjs-dist')` on first PDF), and the
+  worker comes from `pdfjs-dist/build/pdf.worker.min.mjs?url` — bundled by Vite,
+  **never a CDN**: the app runs on `wails://` with no network guarantee and
+  course material must not leak. Eager import cost 430 KB on every launch; lazy
+  keeps the entry chunk at 442 KB and defers pdf.js (405 KB) + worker (1.2 MB).
+  `verbosity: 0` on `getDocument`, or real decks spew hundreds of
+  "TT: undefined function" font warnings.
+- Text-layer CSS is **hand-copied** from `pdfjs-dist/web/pdf_viewer.css` (that
+  file is 260 KB, nearly all of it annotation/editor layers we do not use).
+  `--total-scale-factor` is set on `.page`; pdf.js positions spans in percent
+  and sizes them from `--font-height`, so the layer is scale-independent.
+- **Virtualisation is scroll geometry, not an IntersectionObserver.** The
+  observer's first delivery lands before pages have their final heights and
+  reports the whole document as intersecting; nothing ever retracts that, so a
+  60-page deck held 60 canvases. `recomputeVisible()` derives the visible range
+  (±150px) and the page indicator from `offsetTop`/`offsetHeight` — hence
+  `.pscroll { position: relative }`, which must stay: without it the pages'
+  `offsetParent` is whatever positioned ancestor the host has (focus mode is
+  `position: fixed`) and every page jump lands at the top.
+- The render effect **sweeps every page against the DOM**, not just entries in
+  its `rendered` map: a render still in flight when its page scrolls away can
+  finish after its entry was dropped and leave a painted orphan canvas. A
+  cancelled render bumps a `renderTick` state, or an aborted page keeps a
+  painted canvas with an empty text layer forever (nothing else would wake the
+  effect). Canvas backing store is capped at 2x CSS px.
+- `scrollTo` is **instant, never `behavior: 'smooth'`** — smooth scrolling needs
+  animation frames and a backgrounded WebView gets none.
+- **Highlighting**: right press-and-hold-drag builds the selection by hand
+  (`caretRangeFromPoint` per pointermove) because the browser will not extend a
+  selection for a non-primary button; the `contextmenu` that Windows fires on
+  release is swallowed for that one event (`suppressMenu`). A plain right-click
+  still opens Copy / Highlight selection / Ask Claude. The toolbar highlighter
+  toggle makes left-drag highlight too. Colours yellow/green/blue/pink, last one
+  in `nussync.viewer.hlColor`.
+- Rects are the selection's client rects **clamped to each page's text layer**
+  (a cross-page drag saves one Highlight per page, each with its own quote) and
+  normalised 0..1 to the page box, so a mark made at 175% renders at 60%.
+  Overlays are `pointer-events: none` and multiply-blended under the text layer;
+  **clicks are hit-tested in JS** against the rects, because the text spans sit
+  on top and would otherwise swallow every click.
+- The popover's **note saves on a debounced `oninput`, not `onchange`**: any
+  click outside closes the popover, unmounting the textarea before a change
+  event could fire — typed notes were silently lost.
+- "Ask Claude" goes through `stores.askChat()` -> the one-shot `chatPrefill`
+  store, which ChatPanel consumes and clears (appending, so a half-typed
+  question survives).
+- Backend: table `highlights` (`internal/store/highlights.go`, migrated lazily
+  like `study_*`), bindings `GetHighlights` / `SaveHighlight` / `DeleteHighlight`
+  / `ExportHighlights` plus `SaveTextFile(name, content)` (runtime
+  SaveFileDialog) in `app_highlights.go`; event `highlights:updated {FileID}`.
+  Rects are stored as a JSON blob — the store keeps them opaque, package `main`
+  marshals. See docs/API_CONTRACT.md.
+- Verified 2026-09-06 in `wails dev` on a real 60-page deck: right-drag
+  highlight -> SQLite -> markdown export, colour change, note, delete, rail
+  list, Ctrl+F (67 matches, boxes drawn), zoom 50-300% with marks tracking the
+  text, virtualisation (3-7 live canvases while scrolling), engine toggle both
+  ways, reload persistence, Ask Claude prefill. Console clean apart from the
+  pre-existing `wails/ipc.js` "reading 'nodes'" error from the dev runtime.
+  **Testing note:** the in-app Browser pane throttles frames, so ResizeObserver
+  (fit-width) and post-scroll work appear frozen until a screenshot forces a
+  frame — measure only after forcing one.
+
 ## Backend decisions (2026-09-05)
 - **Contract types live in package `main`** (`types.go`), not a shared package,
   so Wails binding generation emits them under the `main` namespace exactly as

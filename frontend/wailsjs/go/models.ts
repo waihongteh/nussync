@@ -377,6 +377,70 @@ export namespace main {
 	        this.Mean = source["Mean"];
 	    }
 	}
+	export class Rect {
+	    X: number;
+	    Y: number;
+	    W: number;
+	    H: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Rect(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.X = source["X"];
+	        this.Y = source["Y"];
+	        this.W = source["W"];
+	        this.H = source["H"];
+	    }
+	}
+	export class Highlight {
+	    ID: number;
+	    FileID: number;
+	    Page: number;
+	    Rects: Rect[];
+	    Text: string;
+	    Color: string;
+	    Note: string;
+	    CreatedAt: string;
+	    UpdatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Highlight(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.FileID = source["FileID"];
+	        this.Page = source["Page"];
+	        this.Rects = this.convertValues(source["Rects"], Rect);
+	        this.Text = source["Text"];
+	        this.Color = source["Color"];
+	        this.Note = source["Note"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.UpdatedAt = source["UpdatedAt"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class LibraryPaper {
 	    ID: string;
 	    ArxivID: string;
@@ -681,6 +745,7 @@ export namespace main {
 	        this.TakenAt = source["TakenAt"];
 	    }
 	}
+	
 	
 	export class SearchHit {
 	    File: FileNode;
