@@ -4,6 +4,7 @@
    * shared <PetSprite>. Mood, level and quips all come from ../pet.ts.
    */
   import { bubble, level, levelProgress, mood, petName, pokePet, xp } from '../pet';
+  import { equippedTitle, streak } from '../quest';
   import PetSprite from './PetSprite.svelte';
 
   let squashing = $state(false);
@@ -38,8 +39,15 @@
     <PetSprite mood={$mood} level={$level} size={76} squash={squashing} />
   </button>
 
+  {#if $equippedTitle}
+    <span class="title-tag truncate" title="Equipped title">{$equippedTitle}</span>
+  {/if}
+
   <div class="meta">
     <span class="lv">Lv {$level}</span>
+    {#if $streak > 0}
+      <span class="streak" title="{$streak}-day streak">🔥{$streak}</span>
+    {/if}
     <span class="xpbar"><span class="xpfill" style="width:{Math.round($levelProgress * 100)}%"></span></span>
   </div>
 </div>
@@ -48,7 +56,7 @@
   .pet-slot {
     position: relative;
     flex: none;
-    height: 120px;
+    height: 128px;
     margin: 0 10px 2px;
     display: flex;
     flex-direction: column;
@@ -126,6 +134,22 @@
     width: 100%;
     max-width: 116px;
     margin-top: 2px;
+  }
+
+  .title-tag {
+    max-width: 116px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--accent-text);
+  }
+
+  .streak {
+    font-size: 9.5px;
+    font-weight: 650;
+    color: var(--amber);
+    font-variant-numeric: tabular-nums;
+    flex: none;
   }
 
   .lv {

@@ -7,7 +7,8 @@
   import { onDestroy } from 'svelte';
   import Icon from '../components/Icon.svelte';
   import { level } from '../pet';
-  import { deadlines, resolvedTheme } from '../stores';
+  import { deadlines, navigate, resolvedTheme } from '../stores';
+  import { streak, tierBeaten } from '../quest';
   import { arcadePick, type ArcadeGame } from '../games/arcade';
   import {
     fitCanvas,
@@ -203,6 +204,29 @@
             <div class="actions">
               <button class="btn sm primary" onclick={() => play('quiz-rush')}>
                 <Icon name="trophy" size={13} /> Play
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card game">
+          <div class="body">
+            <div class="row">
+              <h2 class="name">Boss ladder</h2>
+              <span class="chip accent">Quest</span>
+            </div>
+            <p class="muted desc">
+              Ten tiers of turn-based quiz bosses, plus one boss per unsubmitted deadline. Your
+              pet's ATK, DEF, HP and SPD come from real studying — and so does the daily streak.
+            </p>
+            <div class="scores">
+              <span class="stat"><span class="k">Tiers</span><span class="v">{$tierBeaten}/10</span></span>
+              <span class="stat"><span class="k">Streak</span><span class="v">{$streak}</span></span>
+            </div>
+            <p class="faint keys"><kbd>1</kbd>–<kbd>4</kbd> answer · <kbd>Esc</kbd> flee</p>
+            <div class="actions">
+              <button class="btn sm primary" onclick={() => navigate('quest')}>
+                <Icon name="sword" size={13} /> Open Quest
               </button>
             </div>
           </div>

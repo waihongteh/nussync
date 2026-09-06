@@ -19,6 +19,7 @@
   import { courseByID, openChat, openFileNode, setContext, studyFile, toast } from '../stores';
   import type { FileNode } from '../types';
   import { ext, fmtBytes, fmtDateTime, markdownToHTML } from '../util';
+  import { recordPreview } from '../quest';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -65,6 +66,19 @@
   function srcFor(f: FileNode): string {
     return f.ID !== 0 ? `/local/${f.ID}` : `/local/path?p=${encodeURIComponent(f.Path)}`;
   }
+
+  /**
+   * Quest xp for actually reading something: a file kept open for a full
+   * minute is worth 2 xp, capped at ten a day by the quest store itself.
+   */
+  const READ_MS = 60_000;
+
+  $effect(() => {
+    const id = file?.ID ?? 0;
+    if (!id) return;
+    const h = setTimeout(() => recordPreview(), READ_MS);
+    return () => clearTimeout(h);
+  });
 
   const mode = $derived(modeFor(file));
   const course = $derived(file ? $courseByID.get(file.CourseID) : undefined);

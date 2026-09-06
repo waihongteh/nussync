@@ -135,6 +135,11 @@ type Settings struct {
 	PaperCategories     []string // arXiv categories, e.g. ["cs.CL","cs.LG"]
 	PaperDigestHour     int      // 0-23 local time, default 9
 	NotifyPapers        bool
+	// PaperTopVenues are the venues that count as tier 2 when ranking search
+	// results, the digest and recommendations; PaperPreferPublished turns
+	// that venue weight on (default true).
+	PaperTopVenues       []string
+	PaperPreferPublished bool
 }
 
 // SyncStatus is the live state of the sync engine.

@@ -560,6 +560,33 @@ gone — `auth status` reports `loggedIn:true`, `claude.ai`, max):
 - `go build ./... && go vet ./... && go test ./... && gofmt -l .` all clean.
 
 
+## Quest: progression + boss ladder (2026-09-06, frontend-only)
+
+`lib/quest.ts` (persisted at `localStorage['nussync.quest']`) layers a Duolingo-ish
+daily goal on top of the existing pet XP. Nothing in Go changed; the ladder runs
+entirely on `GetQuizzes(0)` + `GetTree` + the `deadlines` store.
+
+- **One XP currency.** `pet.ts` stays the only place XP is awarded. It gained
+  `onXP(fn)` and `registerQuipSource(fn)`; quest.ts registers against both so the
+  import stays one-way (quest -> pet) and cycle-free. Never make pet.ts import
+  quest.ts.
+- **Streak roll-over** settles only *fully elapsed* days (`rollover()`); today is
+  added live by the `streak` derived store, so the number cannot double-count.
+  A missed day burns a freeze (1 per 7-day streak, max 2) before breaking.
+- **Stats** are derived counters, not stored numbers: `1 + floor(sqrt(n))` over
+  correct answers / flashcards / (overviews+previews) / best rush streak. Gear
+  unlocks at stat thresholds and is drawn by `PetSprite` itself (it reads
+  `gear`/`skinAccent` from quest.ts), so every call site gets it for free.
+- **Boss HP** = `max(3, ATK * questions * 0.7)`; boss ATK = `1 + tier`. An early
+  `max(8, ...)` floor made tier 1 unwinnable at ATK 1 — don't reintroduce it.
+  Boss-fight hits call `recordBossHit()` (counter only, no XP) because the fight's
+  XP is paid once at win/lose; awarding per question would double-pay.
+- **Papers done +20** is scanned from `GetLibrary('done')` on the `papers:updated`
+  event rather than hooked into Papers.svelte (owned by another workstream).
+- Boss art is procedural SVG from the tier number (`components/BossSprite.svelte`),
+  no assets. Deadline bosses use `(deadline.ID % 10) + 1` as their seed.
+- Route `quest`, nav item after Play, palette "Go to Quest", Arcade card.
+
 ## Dead ends
 - Sanitizing the whole cross-listed course code into one folder name.
 - Passing a multi-line `claude` prompt as an argv element on Windows (see above).

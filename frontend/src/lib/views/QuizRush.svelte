@@ -14,7 +14,7 @@
   import { courses, toast } from '../stores';
   import type { FileNode, Question, Quiz } from '../types';
   import { lsGet, lsSet } from '../util';
-  import * as pet from '../pet';
+  import { recordRush } from '../quest';
 
   const BEST_KEY = 'nussync.arcade.rush';
   const LIVES = 3;
@@ -219,10 +219,9 @@
       best = next;
       lsSet(BEST_KEY, next);
     }
-    const xp = Math.max(1, Math.round(score / 400));
     try {
-      // pet.ts is owned elsewhere; call through only if it exposes addXP.
-      (pet as any).addXP?.(xp, 'rush');
+      // Quest owns the rush payout (score/10) and tracks SPD from the streak.
+      recordRush(score, bestStreak);
     } catch {
       /* the pet is a nicety, never a failure mode */
     }

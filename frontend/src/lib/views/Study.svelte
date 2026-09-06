@@ -15,6 +15,7 @@
   import { courses, courseByID, setContext, studyPreselect, toast } from '../stores';
   import type { AskResult, FileNode, Flashcard, Overview, Quiz, QuizAttempt, StudyJob, StudyStatus } from '../types';
   import { fileKind, fmtBytes, lsGet, lsSet, markdownToHTML, relTime } from '../util';
+  import { recordCorrect, recordFlashcard, recordOverview, recordQuizDone } from '../quest';
 
   const KIND_ICON: Record<string, string> = {
     pdf: 'fileText',
@@ -196,6 +197,8 @@
       job = j;
       if (j.Progress) jobLine = j.Progress;
       if (j.Status === 'done') {
+        // Quest xp for a finished overview (quiz/flashcard xp is earned by use).
+        if (j.Kind === 'overview') recordOverview();
         void refreshFor(j.Kind);
         // Leave the finished job on screen briefly so the line does not flash.
         const id = j.ID;
@@ -412,10 +415,27 @@
   const current = $derived(taking?.Questions?.[qIndex] ?? null);
   const total = $derived(taking?.Questions?.length ?? 0);
 
+  /** When the visible question first appeared — quest xp pays a speed bonus. */
+  let shownAt = $state(Date.now());
+  /** Question ids already awarded, so a re-render cannot double-pay. */
+  let awarded = new Set<number>();
+
+  $effect(() => {
+    void current?.ID;
+    shownAt = Date.now();
+  });
+
+  function awardCorrect(id: number) {
+    if (awarded.has(id)) return;
+    awarded.add(id);
+    recordCorrect(Date.now() - shownAt);
+  }
+
   function pickOption(letter: string) {
     if (!current || revealed) return;
     answers = { ...answers, [current.ID]: letter };
     revealed = true;
+    if (letter.toUpperCase() === current.Answer.trim().toUpperCase()) awardCorrect(current.ID);
   }
 
   function revealShort() {
@@ -426,6 +446,7 @@
   function selfMark(correct: boolean) {
     if (!current) return;
     answers = { ...answers, [current.ID]: correct ? 'correct' : 'wrong' };
+    if (correct) awardCorrect(current.ID);
   }
 
   async function next() {
@@ -456,6 +477,7 @@
         TakenAt: '',
       });
       attempts = (await api.getQuizAttempts(taking.ID)) ?? [];
+      recordQuizDone();
       toast(`Quiz done — ${result.Score}/${result.Total}`, 'success');
     } catch (err) {
       toast(errMsg(err), 'error');
@@ -493,6 +515,7 @@
     if (!c) return;
     try {
       await api.reviewFlashcard(c.ID, grade);
+      recordFlashcard(grade);
     } catch (err) {
       toast(errMsg(err), 'error');
     }

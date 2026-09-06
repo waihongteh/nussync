@@ -55,6 +55,7 @@
     { label: 'Go to Study', icon: 'layers', route: 'study' },
     { label: 'Go to Papers', icon: 'book', route: 'papers' },
     { label: 'Go to Arcade', icon: 'gamepad', route: 'arcade' },
+    { label: 'Go to Quest', icon: 'sword', route: 'quest' },
     { label: 'Go to Settings', icon: 'settings', route: 'settings' },
   ];
 

@@ -4,10 +4,13 @@
    * blink timer. Shared by the docked sidebar pet and the free-roaming overlay.
    */
   import type { Mood } from '../pet';
+  import { gear, skinAccent } from '../quest';
 
   interface Props {
     mood?: Mood;
     level?: number;
+    /** Preview a loot skin's accent without equipping it ('' = use the equipped one). */
+    skin?: string;
     /** 1 = facing right, -1 = facing left. */
     facing?: 1 | -1;
     /** Rendered box in px (the level growth is applied on top of this). */
@@ -20,6 +23,7 @@
   let {
     mood = 'happy',
     level = 1,
+    skin = '',
     facing = 1,
     size = 76,
     walking = false,
@@ -41,6 +45,27 @@
   const hasGlasses = $derived(level >= 5);
   const hasCrown = $derived(level >= 8);
 
+  // Quest loot. Gear is stat-derived, so it equips itself; the skin only
+  // repaints --accent locally, which every part of the sprite already uses.
+  const accent = $derived(skin || $skinAccent);
+  const soft = $derived(accent ? hexA(accent, 0.14) : '');
+  const skinVars = $derived(accent ? `--accent:${accent};--accent-soft:${soft};` : '');
+
+  const hasSword = $derived($gear.sword || $gear.steel);
+  const steel = $derived($gear.steel);
+  const hasScarf = $derived($gear.scarf);
+  const hasShield = $derived($gear.shield);
+  const hasBadge = $derived($gear.badge);
+  const hasShoes = $derived($gear.sneakers);
+
+  /** #rrggbb -> rgba(), so a skin gets a matching soft fill. */
+  function hexA(hex: string, alpha: number): string {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+    if (!m) return hex;
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  }
+
   // Sitting reads as "eyes half closed", same lids the sleepy mood uses.
   const lidded = $derived(sitting || mood === 'sleepy');
 </script>
@@ -53,7 +78,7 @@
   viewBox="0 0 100 104"
   width={size}
   height={size}
-  style="--grow:{grow};--blink:{blinkDur.toFixed(2)}s;--face:{facing}"
+  style="--grow:{grow};--blink:{blinkDur.toFixed(2)}s;--face:{facing};{skinVars}"
   aria-hidden="true"
 >
   <g class="facer">
@@ -67,8 +92,27 @@
           <!-- legs (behind the body) -->
           {#if !sitting}
             <g class="legs">
-              <rect class="leg l" x="36" y="82" width="8" height="16" rx="4" />
-              <rect class="leg r" x="56" y="82" width="8" height="16" rx="4" />
+              <g class="legw l">
+                <rect class="leg" x="36" y="82" width="8" height="16" rx="4" />
+                {#if hasShoes}<rect class="shoe" x="32" y="93" width="16" height="7" rx="3.5" />{/if}
+              </g>
+              <g class="legw r">
+                <rect class="leg" x="56" y="82" width="8" height="16" rx="4" />
+                {#if hasShoes}<rect class="shoe" x="52" y="93" width="16" height="7" rx="3.5" />{/if}
+              </g>
+            </g>
+          {/if}
+
+          <!-- quest gear that sits behind the body -->
+          {#if hasShield}
+            <path class="shield" d="M6 55 20 49l14 6v10c0 8.5-7.6 12.8-14 15.4C13.6 77.8 6 73.5 6 65z" />
+            <path class="shield-boss" d="M20 58v13" />
+          {/if}
+          {#if hasSword}
+            <g class="sword" class:steel>
+              <path class="blade" d="M88 85 95 46l5 2-7 39z" />
+              <path class="guard" d="M82 79 96 87" />
+              <path class="grip" d="M85 84 90 93" />
             </g>
           {/if}
 
@@ -81,6 +125,18 @@
             class="body"
             d="M50 24c24 0 36 15 36 34 0 20-15 34-36 34S14 78 14 58c0-19 12-34 36-34z"
           />
+
+          {#if hasScarf}
+            <path class="scarf" d="M23 79q27 13 54 0v8q-27 13-54 0z" />
+            <path class="scarf tail" d="M71 85 80 99l-7-2-4-8z" />
+          {/if}
+
+          {#if hasBadge}
+            <path
+              class="badge"
+              d="M29 75.6c-1.7-2.7-5.6-1.4-5.6 1.5 0 2.7 3.6 4.6 5.6 6.3 2-1.7 5.6-3.6 5.6-6.3 0-2.9-3.9-4.2-5.6-1.5z"
+            />
+          {/if}
 
           {#if hasBow}
             <g class="bow">
@@ -201,15 +257,18 @@
     fill: var(--accent-soft);
     stroke: var(--accent);
     stroke-width: 2;
+  }
+
+  .legw {
     transform-box: fill-box;
     transform-origin: 50% 10%;
   }
 
-  .sprite.walking .leg.l {
+  .sprite.walking .legw.l {
     animation: step 0.42s ease-in-out infinite;
   }
 
-  .sprite.walking .leg.r {
+  .sprite.walking .legw.r {
     animation: step 0.42s ease-in-out 0.21s infinite;
   }
 
@@ -307,6 +366,65 @@
     stroke: var(--text-muted);
     stroke-width: 1.6;
     opacity: 0.85;
+  }
+
+  /* quest gear */
+
+  .shoe {
+    fill: var(--text-muted);
+    stroke: var(--text);
+    stroke-width: 1.4;
+    opacity: 0.9;
+  }
+
+  .shield {
+    fill: var(--bg-subtle);
+    stroke: var(--text-muted);
+    stroke-width: 2.2;
+    stroke-linejoin: round;
+  }
+
+  .shield-boss {
+    fill: none;
+    stroke: var(--text-muted);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+
+  .blade {
+    fill: #b98a4e;
+    stroke: #8a6534;
+    stroke-width: 1.6;
+    stroke-linejoin: round;
+  }
+
+  .sword.steel .blade {
+    fill: #cdd2da;
+    stroke: #8b919b;
+  }
+
+  .guard,
+  .grip {
+    fill: none;
+    stroke: #8a6534;
+    stroke-width: 3;
+    stroke-linecap: round;
+  }
+
+  .sword.steel .guard,
+  .sword.steel .grip {
+    stroke: #6f7681;
+  }
+
+  .scarf {
+    fill: var(--red);
+    opacity: 0.85;
+  }
+
+  .badge {
+    fill: var(--red);
+    stroke: var(--bg-elevated);
+    stroke-width: 1.2;
   }
 
   /* ----------------------------------------------------------- animation */
@@ -494,7 +612,7 @@
     .z1,
     .z2,
     .sp,
-    .leg,
+    .legw,
     .sprite.squash .squasher {
       animation: none !important;
     }

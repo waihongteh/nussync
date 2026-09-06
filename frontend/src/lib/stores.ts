@@ -30,6 +30,7 @@ export const ROUTES = [
   'study',
   'papers',
   'arcade',
+  'quest',
   'settings',
 ] as const;
 export type Route = (typeof ROUTES)[number];

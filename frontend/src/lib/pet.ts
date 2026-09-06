@@ -130,11 +130,32 @@ export const levelProgress = derived(xp, ($xp) => {
   return Math.min(1, Math.max(0, ($xp - from) / (to - from)));
 });
 
-function award(points: number) {
+/**
+ * Listeners notified after every xp award. `quest.ts` uses this to log the
+ * daily goal without pet.ts having to know that module exists (which keeps the
+ * import one-way and cycle-free).
+ */
+type XPListener = (points: number, reason: string) => void;
+
+const xpListeners = new Set<XPListener>();
+
+export function onXP(fn: XPListener): () => void {
+  xpListeners.add(fn);
+  return () => xpListeners.delete(fn);
+}
+
+function award(points: number, reason = '') {
   if (points <= 0) return;
   const before = levelFor(get(xp));
   xp.update((v) => v + points);
   persist();
+  for (const fn of xpListeners) {
+    try {
+      fn(points, reason);
+    } catch {
+      /* a listener must never break an award */
+    }
+  }
   if (levelFor(get(xp)) > before) beProud();
 }
 
@@ -147,7 +168,7 @@ export function addXP(points: number, reason = ''): void {
   const n = Math.floor(points);
   if (n <= 0) return;
   if (import.meta.env?.DEV && reason) console.debug(`[pet] +${n} xp (${reason})`);
-  award(n);
+  award(n, reason);
 }
 
 // -------------------------------------------------------------- easter egg
@@ -294,9 +315,40 @@ function relDue(dueAt: string): string {
   return c === 'overdue' ? 'overdue' : `in ${c}`;
 }
 
+/**
+ * Extra quip lines contributed by other modules (quest.ts adds progression
+ * lines). Registered rather than imported so pet.ts keeps no dependency on
+ * anything above it.
+ */
+type QuipSource = () => string[];
+
+const quipSources = new Set<QuipSource>();
+
+export function registerQuipSource(fn: QuipSource): () => void {
+  quipSources.add(fn);
+  return () => quipSources.delete(fn);
+}
+
+function extraQuips(): string[] {
+  const out: string[] = [];
+  for (const fn of quipSources) {
+    try {
+      out.push(...fn());
+    } catch {
+      /* a bad source is just no quips */
+    }
+  }
+  return out.filter((s) => !!s);
+}
+
 /** Pick a quip for a mood, dropping any whose tokens cannot be filled. */
 export function quipFor(m: Mood): string {
   const vars = tokens();
+  // Roughly a third of quips come from progression when any are available.
+  const extra = extraQuips();
+  if (extra.length > 0 && m !== 'sleepy' && m !== 'busy' && Math.random() < 0.35) {
+    return extra[Math.floor(Math.random() * extra.length)];
+  }
   const usable = QUIPS[m].filter((q) => {
     const needed = q.match(/\{(\w+)\}/g) ?? [];
     return needed.every((tok) => (vars[tok.slice(1, -1)] ?? '') !== '');

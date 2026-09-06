@@ -31,6 +31,7 @@
     { id: 'papers', label: 'Papers', icon: 'book' },
     { id: 'settings', label: 'Settings', icon: 'settings' },
     { id: 'arcade', label: 'Play', icon: 'gamepad' },
+    { id: 'quest', label: 'Quest', icon: 'sword' },
   ];
 
   /**

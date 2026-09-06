@@ -17,6 +17,7 @@
     wireEvents,
   } from './lib/stores';
   import { initPet } from './lib/pet';
+  import { initQuest } from './lib/quest';
   import Announcements from './lib/views/Announcements.svelte';
   import Arcade from './lib/views/Arcade.svelte';
   import Deadlines from './lib/views/Deadlines.svelte';
@@ -24,6 +25,7 @@
   import Grades from './lib/views/Grades.svelte';
   import Home from './lib/views/Home.svelte';
   import Papers from './lib/views/Papers.svelte';
+  import Quest from './lib/views/Quest.svelte';
   import Settings from './lib/views/Settings.svelte';
   import Study from './lib/views/Study.svelte';
   import WhatsNew from './lib/views/WhatsNew.svelte';
@@ -38,6 +40,7 @@
     study: 'Study',
     papers: 'Papers',
     arcade: 'Arcade',
+    quest: 'Quest',
     settings: 'Settings',
   };
 
@@ -46,9 +49,11 @@
   $effect(() => {
     const teardown = wireEvents();
     const petTeardown = initPet();
+    const questTeardown = initQuest();
     void loadAll();
     return () => {
       teardown();
+      questTeardown();
       petTeardown();
     };
   });
@@ -132,6 +137,8 @@
         <Papers />
       {:else if $route === 'arcade'}
         <Arcade />
+      {:else if $route === 'quest'}
+        <Quest />
       {:else if $route === 'settings'}
         <Settings />
       {/if}
