@@ -24,6 +24,7 @@
    */
   import { api, errMsg, on } from '../api';
   import { askChat, toast } from '../stores';
+  import { HighlightHistory } from '../highlightHistory';
   import type { Highlight, MenuItem, Rect } from '../types';
   import { lsGet, lsSet } from '../util';
   import ContextMenu from './ContextMenu.svelte';
@@ -117,6 +118,13 @@
 
   let popover = $state<{ id: number; x: number; y: number } | null>(null);
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+
+  /** Undo/redo, see lib/highlightHistory.ts. Mirrored into $state for the buttons. */
+  let canUndo = $state(false);
+  let canRedo = $state(false);
+  /** Gmail-style "Highlight removed · Undo" strip, cleared after 4s. */
+  let undoToast = $state<string>('');
+  let undoToastTimer: ReturnType<typeof setTimeout> | null = null;
 
   let rootEl = $state<HTMLDivElement | null>(null);
   let scrollEl = $state<HTMLDivElement | null>(null);
@@ -258,8 +266,72 @@
   $effect(() => {
     const id = fileID;
     void id;
+    // A different document's history would undo into the wrong file.
+    history.clear();
+    hideUndoToast();
     void loadHighlights();
   });
+
+  // ------------------------------------------------------------ undo / redo
+
+  /**
+   * The three primitives the command stack drives. They mutate the local array
+   * as well as the backend so the rail and the page overlays follow every
+   * undo/redo without waiting for the `highlights:updated` round trip. Errors
+   * propagate: the stack drops itself and the viewer reloads.
+   */
+  const history = new HighlightHistory({
+    create: async (h) => {
+      const saved = await api.saveHighlight({ ...h, ID: 0 });
+      highlights = [...highlights.filter((x) => x.ID !== saved.ID), saved].sort(
+        (a, b) => a.Page - b.Page || a.ID - b.ID,
+      );
+      return saved;
+    },
+    remove: async (id) => {
+      await api.deleteHighlight(id);
+      highlights = highlights.filter((x) => x.ID !== id);
+      if (popover?.id === id) popover = null;
+    },
+    patch: async (id, changes) => {
+      await applyPatch(id, changes);
+    },
+    onChange: () => {
+      canUndo = history.canUndo;
+      canRedo = history.canRedo;
+    },
+    onError: (err) => {
+      toast(`Could not undo: ${errMsg(err)}`, 'error');
+      void loadHighlights();
+    },
+  });
+
+  function hideUndoToast() {
+    if (undoToastTimer) clearTimeout(undoToastTimer);
+    undoToastTimer = null;
+    undoToast = '';
+  }
+
+  function showUndoToast(msg: string) {
+    if (undoToastTimer) clearTimeout(undoToastTimer);
+    undoToast = msg;
+    undoToastTimer = setTimeout(hideUndoToast, 4000);
+  }
+
+  async function doUndo() {
+    hideUndoToast();
+    // A note still sitting in the debounce would land *after* the undo.
+    flushNote();
+    if (!history.canUndo) return;
+    await history.undo();
+  }
+
+  async function doRedo() {
+    hideUndoToast();
+    flushNote();
+    if (!history.canRedo) return;
+    await history.redo();
+  }
 
   // Another window (or the Study view) may write highlights for this file.
   $effect(() =>
@@ -618,6 +690,7 @@
         );
       }
       highlights = [...highlights, ...saved].sort((a, b) => a.Page - b.Page || a.ID - b.ID);
+      history.recordAdd(saved);
     } catch (err) {
       toast(`Could not save the highlight: ${errMsg(err)}`, 'error');
     }
@@ -650,6 +723,10 @@
 
   function onPointerDown(e: PointerEvent) {
     popover = null;
+    // Nothing in the page stack is focusable, so a click would otherwise leave
+    // <body> focused and every viewer shortcut (Ctrl+F, Ctrl+Z) would be
+    // treated as fired outside the viewer.
+    scrollEl?.focus({ preventScroll: true });
     if (e.button !== 2) return;
     const anchor = caretRange(e.clientX, e.clientY);
     if (!anchor) return;
@@ -737,12 +814,28 @@
     popover = hit ? { id: hit.ID, x: e.clientX, y: e.clientY } : null;
   }
 
-  async function patch(h: Highlight, changes: Partial<Highlight>) {
-    const next = { ...h, ...changes };
-    highlights = highlights.map((x) => (x.ID === h.ID ? next : x));
+  /** Optimistic write of a partial change. Throws — callers decide what to do. */
+  async function applyPatch(id: number, changes: Partial<Highlight>) {
+    const cur = highlights.find((x) => x.ID === id);
+    if (!cur) throw new Error('that highlight no longer exists');
+    const next = { ...cur, ...changes };
+    highlights = highlights.map((x) => (x.ID === id ? next : x));
+    const saved = await api.saveHighlight(next);
+    highlights = highlights.map((x) => (x.ID === saved.ID ? saved : x));
+  }
+
+  async function patch(
+    h: Highlight,
+    changes: Partial<Highlight>,
+    opts: { note?: boolean; before?: Partial<Highlight> } = {},
+  ) {
+    // Snapshot the fields being changed so undo can put them back.
+    const before: Partial<Highlight> =
+      opts.before ??
+      Object.fromEntries(Object.keys(changes).map((k) => [k, (h as any)[k]]));
     try {
-      const saved = await api.saveHighlight(next);
-      highlights = highlights.map((x) => (x.ID === saved.ID ? saved : x));
+      await applyPatch(h.ID, changes);
+      history.recordUpdate(h.ID, before, changes, { note: opts.note });
     } catch (err) {
       toast(`Could not update the highlight: ${errMsg(err)}`, 'error');
       void loadHighlights();
@@ -751,9 +844,12 @@
 
   async function remove(h: Highlight) {
     popover = null;
+    const snapshot = { ...h };
     highlights = highlights.filter((x) => x.ID !== h.ID);
     try {
       await api.deleteHighlight(h.ID);
+      history.recordDelete([snapshot]);
+      showUndoToast('Highlight removed');
     } catch (err) {
       toast(`Could not delete the highlight: ${errMsg(err)}`, 'error');
       void loadHighlights();
@@ -766,25 +862,31 @@
    * would ever fire — typed notes were silently lost.
    */
   let noteTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingNote: { h: Highlight; text: string } | null = null;
+  let pendingNote: { h: Highlight; before: string; text: string } | null = null;
 
   function flushNote() {
     if (noteTimer) clearTimeout(noteTimer);
     noteTimer = null;
     const p = pendingNote;
     pendingNote = null;
-    if (p) void patch(p.h, { Note: p.text });
+    // `before` is the note as it stood before this burst of typing started —
+    // the history then coalesces neighbouring bursts into one undo step.
+    if (p) void patch(p.h, { Note: p.text }, { note: true, before: { Note: p.before } });
   }
 
   function noteInput(h: Highlight, text: string) {
     // Optimistic, so the rail and a re-opened popover show it immediately.
     highlights = highlights.map((x) => (x.ID === h.ID ? { ...x, Note: text } : x));
-    pendingNote = { h, text };
+    const keep = pendingNote && pendingNote.h.ID === h.ID ? pendingNote.before : h.Note;
+    pendingNote = { h, before: keep, text };
     if (noteTimer) clearTimeout(noteTimer);
     noteTimer = setTimeout(flushNote, 400);
   }
 
-  $effect(() => () => flushNote());
+  $effect(() => () => {
+    flushNote();
+    hideUndoToast();
+  });
 
   function recolour(h: Highlight, color: string) {
     lastColor = color;
@@ -958,8 +1060,19 @@
       queueMicrotask(() => findInput?.select());
       return;
     }
+    // `typing` keeps the note textarea's native undo intact.
     if (!inside || typing) return;
 
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      void (e.shiftKey ? doRedo() : doUndo());
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+      e.preventDefault();
+      void doRedo();
+      return;
+    }
     if (e.key === 'PageDown' || e.key === 'PageUp') {
       e.preventDefault();
       scrollToPage(Math.min(numPages, Math.max(1, currentPage + (e.key === 'PageDown' ? 1 : -1))));
@@ -1033,6 +1146,24 @@
     <div class="spacer"></div>
 
     <div class="grp">
+      <button
+        class="icon-btn"
+        onclick={() => void doUndo()}
+        disabled={!canUndo}
+        title="Undo (Ctrl+Z)"
+        aria-label="Undo"
+      >
+        <Icon name="undo" size={13} />
+      </button>
+      <button
+        class="icon-btn"
+        onclick={() => void doRedo()}
+        disabled={!canRedo}
+        title="Redo (Ctrl+Y)"
+        aria-label="Redo"
+      >
+        <Icon name="redo" size={13} />
+      </button>
       <button
         class="icon-btn"
         class:on={highlighterOn}
@@ -1119,6 +1250,7 @@
     <div
       class="pscroll"
       class:marker={highlighterOn}
+      tabindex="-1"
       bind:this={scrollEl}
       onscroll={onScroll}
       onwheel={onWheel}
@@ -1196,6 +1328,14 @@
       </aside>
     {/if}
   </div>
+
+  {#if undoToast}
+    <div class="undobar" role="status">
+      <span>{undoToast}</span>
+      <span class="dot">·</span>
+      <button class="undolink" onclick={() => void doUndo()}>Undo</button>
+    </div>
+  {/if}
 </div>
 
 {#if activeHighlight && popover}
@@ -1252,11 +1392,44 @@
 
 <style>
   .pdfv {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
     min-height: 0;
     background: var(--bg-subtle);
+  }
+
+  /* Gmail-style transient strip after a delete; disappears on its own. */
+  .undobar {
+    position: absolute;
+    left: 16px;
+    bottom: 16px;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-inverse, #23262b);
+    color: var(--text-inverse, #f2f4f7);
+    font-size: 12px;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+  }
+
+  .undobar .dot {
+    opacity: 0.5;
+  }
+
+  .undolink {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
   }
 
   .ptools {
@@ -1387,6 +1560,11 @@
     gap: 12px;
     /* Ctrl+wheel zoom must not also pinch-zoom the WebView. */
     overscroll-behavior: contain;
+  }
+
+  /* Focused programmatically on click so the shortcuts land; no focus ring. */
+  .pscroll:focus {
+    outline: none;
   }
 
   .pscroll.marker {

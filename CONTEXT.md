@@ -1100,3 +1100,12 @@ only — never backend settings) plus `resetLayout()`. Keys are namespaced
   CSS transitions and ResizeObserver callbacks appear frozen until a screenshot
   forces a frame, and `resize_window` does not always fire a `resize` event —
   dispatch one manually when testing width-dependent logic.
+- Queued: PDF text-box annotations (double-click blank area; move/resize/colour; Kind column on highlights table; undo stack; rail + export).
+- 2026-09-06: PDF highlight undo/redo lives in `frontend/src/lib/highlightHistory.ts` —
+  a per-file command stack (cap 100, cleared on file change) of plain-data
+  `add`/`delete`/`update` commands driven by hooks the viewer supplies, with note
+  edits coalesced within 1.5s. `Store.PutHighlight` treats a non-zero ID as an
+  UPDATE, so a deleted row cannot be re-created under its old id: undo re-inserts
+  and records old -> new in a remap every command resolves through. `.pscroll`
+  now takes `tabindex="-1"` and is focused on pointerdown, otherwise the target of
+  a keypress is `<body>` and no viewer shortcut (Ctrl+F included) ever fired.
