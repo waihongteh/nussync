@@ -14,7 +14,7 @@
   import type { Route } from '../stores';
   import type { FileNode } from '../types';
   import { playGame } from '../games/arcade';
-  import { resetLayout, toggleSidebar, toggleTree, toggleViewerFocus } from '../layout';
+  import { resetLayout, toggleListCollapsed, toggleSidebar, toggleTree, toggleViewerFocus } from '../layout';
   import { fileKind, fmtBytes, fuzzyScore } from '../util';
   import Icon from './Icon.svelte';
 
@@ -135,6 +135,14 @@
       hint: 'Layout · Ctrl+Shift+E',
       icon: 'panelLeft',
       run: toggleTree,
+    },
+    {
+      key: 'cmd:toggle-list',
+      kind: 'command' as const,
+      label: 'Toggle file list',
+      hint: 'Layout · Ctrl+Shift+L',
+      icon: 'files',
+      run: toggleListCollapsed,
     },
     {
       key: 'cmd:toggle-focus',

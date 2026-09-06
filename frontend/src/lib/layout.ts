@@ -35,6 +35,7 @@ const SIDEBAR_KEY = 'nussync.layout.sidebar';
 const SIDEBAR_W_KEY = 'nussync.layout.sidebarW';
 const TREE_KEY = 'nussync.layout.tree';
 const TREE_W_KEY = 'nussync.layout.treeW';
+const LIST_KEY = 'nussync.layout.list';
 const CHAT_MODE_KEY = 'nussync.layout.chatMode';
 const CHAT_W_KEY = 'nussync.layout.chatW';
 
@@ -54,6 +55,12 @@ export const CHAT_W_MIN = 320;
 export const CHAT_W_MAX = 560;
 /** Width of the docked chat once the collapse chevron has been used. */
 export const CHAT_RAIL_W = 40;
+
+/**
+ * Width of the Files list pane once it has been collapsed to its strip — just
+ * enough for a rotated "n files" label and the ▲/▼ step buttons.
+ */
+export const LIST_RAIL_W = 44;
 
 /** Below this window width, 'auto' means rail. */
 export const AUTO_RAIL_BELOW = 1100;
@@ -89,6 +96,16 @@ export const sidebarW = writable<number>(
 /** Files' folder tree visibility. */
 export const treeOpen = writable<boolean>(lsGet<boolean>(TREE_KEY, true));
 export const treeW = writable<number>(clamp(lsGet<number>(TREE_W_KEY, TREE_W_DEFAULT), TREE_W_MIN, TREE_W_MAX));
+
+/**
+ * Files' list pane collapsed to a strip. Persisted, unlike the chat's collapse:
+ * with a viewer and a docked chat open this is a working posture, not a
+ * momentary one, and having to re-collapse it every launch would be a chore.
+ * Files also collapses the list *automatically* when the row runs out of room;
+ * that is derived locally and never written back here, so the user's own choice
+ * survives a resize.
+ */
+export const listCollapsed = writable<boolean>(lsGet<boolean>(LIST_KEY, false));
 
 /** Chat placement preference. */
 export const chatMode = writable<ChatMode>(readChatMode());
@@ -129,6 +146,7 @@ sidebarMode.subscribe((v) => lsSet(SIDEBAR_KEY, v));
 sidebarW.subscribe((v) => lsSet(SIDEBAR_W_KEY, Math.round(v)));
 treeOpen.subscribe((v) => lsSet(TREE_KEY, v));
 treeW.subscribe((v) => lsSet(TREE_W_KEY, Math.round(v)));
+listCollapsed.subscribe((v) => lsSet(LIST_KEY, v));
 chatMode.subscribe((v) => lsSet(CHAT_MODE_KEY, v));
 chatW.subscribe((v) => lsSet(CHAT_W_KEY, Math.round(v)));
 
@@ -139,6 +157,10 @@ export function toggleSidebar() {
 
 export function toggleTree() {
   treeOpen.update((v) => !v);
+}
+
+export function toggleListCollapsed() {
+  listCollapsed.update((v) => !v);
 }
 
 export function toggleViewerFocus() {
@@ -172,6 +194,7 @@ export function resetLayout() {
   sidebarW.set(SIDEBAR_W_DEFAULT);
   treeOpen.set(true);
   treeW.set(TREE_W_DEFAULT);
+  listCollapsed.set(false);
   chatMode.set('docked');
   chatW.set(CHAT_W_DEFAULT);
   chatCollapsed.set(false);

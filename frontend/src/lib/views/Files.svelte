@@ -7,16 +7,20 @@
   import ResizeHandle from '../components/ResizeHandle.svelte';
   import Viewer from '../components/Viewer.svelte';
   import {
+    LIST_RAIL_W,
     TREE_AUTOHIDE_BELOW,
     TREE_W_DEFAULT,
     TREE_W_MAX,
     TREE_W_MIN,
+    listCollapsed,
     setTreeWidth,
+    toggleListCollapsed,
     toggleTree,
     treeOpen,
     treeW,
     viewerFocus,
   } from '../layout';
+  import { tip } from '../tooltip';
   import {
     courses,
     courseByID,
@@ -47,12 +51,27 @@
   const SELECTED_KEY = 'nussync.files.selectedFolder';
   const VIEWER_W_KEY = 'nussync.viewer.w';
   const VIEWER_MIN = 320;
-  /** Width the list pane holds on to before the viewer starts giving ground. */
-  const LIST_MIN = 260;
+  /**
+   * Narrowest the list pane is still worth showing. Below this it collapses to
+   * the strip rather than shrinking further — a 260px table of four columns is
+   * the "S… / Lectur… / 4…" mess this replaced.
+   */
+  const LIST_MIN = 320;
   /** …and the width below which the viewer stops giving ground instead. */
   const VIEWER_FLOOR = 420;
   /** `ResizeHandle`'s own width, which the panes row also has to pay for. */
   const HANDLE_W = 5;
+
+  /**
+   * Column budget for the list, measured on the pane itself (not the window —
+   * the tree, the viewer and a docked chat all change it independently). Each
+   * column drops out at the point where keeping it would start eating the name.
+   */
+  const COL_TIME_MIN = 560;
+  const COL_SIZE_MIN = 470;
+  const COL_MOD_MIN = 380;
+  /** Below this the "New" badge is a dot; the word no longer earns its width. */
+  const CHIP_DOT_BELOW = 360;
 
   let roots = $state<FileNode[]>([]);
   let loading = $state(true);
@@ -67,9 +86,12 @@
   let viewerOpen = $state(false);
   let viewerW = $state(Math.max(VIEWER_MIN, lsGet<number>(VIEWER_W_KEY, 520)));
   let panesEl = $state<HTMLDivElement | null>(null);
+  let listEl = $state<HTMLDivElement | null>(null);
   let tableWrapEl = $state<HTMLDivElement | null>(null);
   /** Measured width of the panes row, for the tree's auto-hide rule. */
   let panesW = $state(1200);
+  /** Measured width of the list pane, for the responsive columns. */
+  let listW = $state(900);
 
   $effect(() => {
     const el = panesEl;
@@ -78,6 +100,37 @@
     ro.observe(el);
     return () => ro.disconnect();
   });
+
+  $effect(() => {
+    const el = listEl;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => (listW = entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
+  /**
+   * Which optional columns survive at the current pane width. Dropping them in
+   * this order — Modified, then Size, then Module/folder — always leaves the
+   * name the space, which is the only column you cannot guess from context.
+   */
+  const cols = $derived({
+    mod: listW >= COL_MOD_MIN,
+    size: listW >= COL_SIZE_MIN,
+    time: listW >= COL_TIME_MIN,
+  });
+
+  /** Fixed-table column widths for whichever set is showing. */
+  const colW = $derived.by(() => {
+    if (cols.time) return { name: '46%', mod: '26%', size: '12%', time: '16%' };
+    if (cols.size) return { name: '54%', mod: '30%', size: '16%', time: '0' };
+    if (cols.mod) return { name: '64%', mod: '36%', size: '0', time: '0' };
+    return { name: '100%', mod: '0', size: '0', time: '0' };
+  });
+
+  const chipDot = $derived(listW < CHIP_DOT_BELOW);
+  /** Narrow enough that the full crumb trail would push the count off the row. */
+  const crumbTight = $derived(listW < COL_TIME_MIN);
 
   /**
    * The tree yields to the viewer on a narrow content area — the breadcrumb is
@@ -165,6 +218,9 @@
   });
 
   const totalBytes = $derived(visibleFiles.reduce((acc, f) => acc + f.Size, 0));
+
+  /** 1-based position of the selection, or 0 when nothing is selected. */
+  const selIndex = $derived(visibleFiles.findIndex((f) => keyOf(f) === selectedFile) + 1);
 
   function toggle(key: string) {
     const next = new Set(expanded);
@@ -284,7 +340,9 @@
     if (list.length === 0) return;
     const i = list.findIndex((f) => keyOf(f) === selectedFile);
     const next = list[Math.min(list.length - 1, Math.max(0, (i < 0 ? 0 : i) + delta))];
-    if (next) select(next);
+    // Follow with the viewer only if it is already open — stepping through a
+    // collapsed list should not conjure a preview pane.
+    if (next) select(next, viewerOpen);
   }
 
   /** True while the user is typing somewhere a bare arrow key belongs to them. */
@@ -310,6 +368,11 @@
       toggleTree();
       return;
     }
+    if (mod && e.shiftKey && (e.key === 'l' || e.key === 'L')) {
+      e.preventDefault();
+      toggleListCollapsed();
+      return;
+    }
     // In focus mode the Viewer owns Esc and the arrows.
     if ($viewerFocus) return;
     if (e.key === 'Escape' && viewerOpen && !menu) {
@@ -320,7 +383,9 @@
       }
       return;
     }
-    if (!viewerOpen || inField(e.target)) return;
+    // Arrows drive the selection whenever the list is not the thing you would
+    // be clicking in: a viewer to update, or a collapsed strip to step through.
+    if ((!viewerOpen && !listCollapsedEff) || inField(e.target)) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
       e.preventDefault();
       step(1);
@@ -341,25 +406,37 @@
     Math.max(0, panesW - (treeShown ? $treeW + HANDLE_W : 0) - (viewerOpen ? HANDLE_W : 0)),
   );
 
+  /**
+   * The list gives up its table before the viewer gives up its width: once the
+   * row cannot seat both a readable list and a usable viewer, the list goes to
+   * its strip. `listCollapsed` is the user's own choice and is never written by
+   * this, so expanding again works the moment there is room.
+   */
+  const listCollapsedEff = $derived($listCollapsed || (viewerOpen && availW - VIEWER_FLOOR < LIST_MIN));
+
+  /** The list's share of the row: the strip when collapsed, LIST_MIN otherwise. */
+  const listKeep = $derived(listCollapsedEff ? LIST_RAIL_W : LIST_MIN);
+
   /** Always leave room for the list pane (and the tree, when it is showing). */
-  const viewerMax = $derived(Math.max(VIEWER_MIN, availW - LIST_MIN));
+  const viewerMax = $derived(Math.max(VIEWER_MIN, availW - listKeep));
 
   /**
    * What the viewer pane is actually given, as opposed to what the user asked
    * for. Squeezing the content area — opening the chat, narrowing the window —
    * spends the space in a fixed order: the tree hides (see `treeShown`), then
-   * the list narrows down to LIST_MIN while the viewer keeps its preference,
-   * and only then does the viewer give ground, down to VIEWER_FLOOR. Past that
-   * the list yields the rest, because a 300px PDF is no use to anyone.
+   * the list collapses to its strip (see `listCollapsedEff`) while the viewer
+   * keeps its preference, and only then does the viewer give ground, down to
+   * VIEWER_FLOOR. Past that even the strip yields, because a 300px PDF is no
+   * use to anyone.
    *
    * `viewerW` is never written by this, so the preference comes back untouched
    * as soon as there is room for it again.
    */
   const effViewerW = $derived.by(() => {
     if (!viewerOpen) return viewerW;
-    const wanted = Math.min(viewerW, Math.max(availW - LIST_MIN, VIEWER_FLOOR));
+    const wanted = Math.min(viewerW, Math.max(availW - listKeep, VIEWER_FLOOR));
     // Never wider than the row itself, whatever the floor says.
-    return Math.max(VIEWER_MIN, Math.min(wanted, Math.max(VIEWER_MIN, availW - 40)));
+    return Math.max(VIEWER_MIN, Math.min(wanted, Math.max(VIEWER_MIN, availW - LIST_RAIL_W)));
   });
 
   function setViewerW(v: number) {
@@ -421,7 +498,43 @@
     return out;
   });
 
+  /**
+   * What the header actually renders. Narrow, the middle of the trail becomes a
+   * single "…" that still navigates — to the parent, which is the crumb anyone
+   * reaches for — so the row never wraps or shoves the file count off the end.
+   */
+  const shownCrumbs = $derived(
+    crumbTight && crumbs.length > 2
+      ? [{ label: '…', key: crumbs[crumbs.length - 2].key }, crumbs[crumbs.length - 1]]
+      : crumbs,
+  );
+
   const breadcrumb = $derived(crumbs.map((c) => c.label).join(' / '));
+
+  /**
+   * `tip`, but only once the name is actually clipped. The check runs on hover
+   * rather than up front because the pane resizes under the row; registering it
+   * *before* `tip` matters, so the freshly computed `disabled` is the one the
+   * tooltip's own pointerenter handler reads.
+   */
+  function nameTip(node: HTMLElement, text: string) {
+    let cur = text;
+    let t: ReturnType<typeof tip> | undefined;
+    const check = () =>
+      t?.update({ text: cur, side: 'top', disabled: node.scrollWidth <= node.clientWidth + 1 });
+    node.addEventListener('pointerenter', check);
+    t = tip(node, { text, side: 'top', disabled: true });
+    return {
+      update(next: string) {
+        cur = next;
+        t?.update({ text: next, side: 'top', disabled: true });
+      },
+      destroy() {
+        node.removeEventListener('pointerenter', check);
+        t?.destroy();
+      },
+    };
+  }
 
   function goCrumb(key: string) {
     selectedFolder = key;
@@ -517,30 +630,80 @@
     />
     {/if}
 
-    <div class="list-pane">
+    <div class="list-pane" class:collapsed={listCollapsedEff} bind:this={listEl}>
+      {#if listCollapsedEff}
+        <!--
+          The strip. The whole thing expands on click, so the two step buttons
+          have to stop the event from reaching it — otherwise every ▲ press
+          would also throw the table back open.
+        -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="list-rail"
+          role="button"
+          tabindex="0"
+          aria-label="Expand the file list (Ctrl+Shift+L)"
+          onclick={() => listCollapsed.set(false)}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              listCollapsed.set(false);
+            }
+          }}
+        >
+          <button
+            class="rail-btn"
+            onclick={(e) => { e.stopPropagation(); step(-1); }}
+            title="Previous file (↑)"
+            aria-label="Previous file"
+            disabled={visibleFiles.length === 0}
+          >
+            <Icon name="chevronUp" size={13} />
+          </button>
+          <span class="rail-label">{visibleFiles.length} files</span>
+          <span class="rail-idx">{selIndex || '–'}/{visibleFiles.length}</span>
+          <button
+            class="rail-btn"
+            onclick={(e) => { e.stopPropagation(); step(1); }}
+            title="Next file (↓)"
+            aria-label="Next file"
+            disabled={visibleFiles.length === 0}
+          >
+            <Icon name="chevronDown" size={13} />
+          </button>
+        </div>
+      {:else}
       <div class="crumb">
         <nav class="crumb-path" aria-label="Folder breadcrumb">
-          {#each crumbs as c, i (c.key)}
+          {#each shownCrumbs as c, i (c.key)}
             {#if i > 0}<span class="sep" aria-hidden="true">/</span>{/if}
             <button
               class="crumb-btn truncate"
-              class:last={i === crumbs.length - 1}
+              class:last={i === shownCrumbs.length - 1}
               onclick={() => goCrumb(c.key)}
-              disabled={i === crumbs.length - 1}
+              disabled={i === shownCrumbs.length - 1}
             >{c.label}</button>
           {/each}
         </nav>
-        <span class="crumb-meta">{visibleFiles.length} files · {fmtBytes(totalBytes)}</span>
+        <span class="crumb-meta">{visibleFiles.length} files{crumbTight ? '' : ` · ${fmtBytes(totalBytes)}`}</span>
+        <button
+          class="crumb-collapse"
+          onclick={toggleListCollapsed}
+          title="Collapse the file list (Ctrl+Shift+L)"
+          aria-label="Collapse the file list"
+        >
+          <Icon name="chevronLeft" size={13} />
+        </button>
       </div>
 
       <div class="table-wrap" bind:this={tableWrapEl}>
         <table class="table">
           <thead>
             <tr>
-              <th class="c-name">Name</th>
-              <th class="c-mod">Module / folder</th>
-              <th class="c-size">Size</th>
-              <th class="c-time">Modified</th>
+              <th class="c-name" style="width:{colW.name}">Name</th>
+              {#if cols.mod}<th class="c-mod" style="width:{colW.mod}">Module / folder</th>{/if}
+              {#if cols.size}<th class="c-size" style="width:{colW.size}">Size</th>{/if}
+              {#if cols.time}<th class="c-time" style="width:{colW.time}">Modified</th>{/if}
             </tr>
           </thead>
           <tbody>
@@ -556,14 +719,22 @@
                   <span class="cell">
                     <span class="dot" style="background:{$courseByID.get(f.CourseID)?.Color ?? 'var(--text-faint)'}"></span>
                     <Icon name={KIND_ICON[fileKind(f.Name)] ?? 'file'} size={14} />
-                    <span class="truncate">{f.Name}</span>
-                    {#if f.IsNew}<span class="chip nw" title="Changed since you last opened What's new">New</span>{/if}
-                    {#if !f.Synced}<span class="chip ns">not synced</span>{/if}
+                    <span class="truncate" use:nameTip={f.Name}>{f.Name}</span>
+                    {#if f.IsNew}
+                      <span
+                        class="chip nw"
+                        class:dot-only={chipDot}
+                        title="Changed since you last opened What's new"
+                      >{chipDot ? '' : 'New'}</span>
+                    {/if}
+                    {#if !f.Synced && !chipDot}<span class="chip ns">not synced</span>{/if}
                   </span>
                 </td>
-                <td class="c-mod truncate">{f.Module || f.RelPath.split('/').slice(0, -1).join(' / ') || '—'}</td>
-                <td class="c-size">{fmtBytes(f.Size)}</td>
-                <td class="c-time">{relTime(f.ModifiedAt, tick)}</td>
+                {#if cols.mod}
+                  <td class="c-mod truncate">{f.Module || f.RelPath.split('/').slice(0, -1).join(' / ') || '—'}</td>
+                {/if}
+                {#if cols.size}<td class="c-size">{fmtBytes(f.Size)}</td>{/if}
+                {#if cols.time}<td class="c-time">{relTime(f.ModifiedAt, tick)}</td>{/if}
               </tr>
             {/each}
           </tbody>
@@ -591,6 +762,7 @@
           </div>
         {/if}
       </div>
+      {/if}
     </div>
 
     {#if viewerOpen}
@@ -784,11 +956,81 @@
     min-height: 0;
   }
 
+  .list-pane.collapsed {
+    flex: none;
+    width: 44px;
+    border-right: 1px solid var(--border);
+    background: var(--bg-subtle);
+  }
+
+  .list-rail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    height: 100%;
+    padding: 10px 0;
+    cursor: pointer;
+    color: var(--text-faint);
+    transition: background var(--t);
+  }
+
+  .list-rail:hover,
+  .list-rail:focus-visible {
+    background: var(--bg-hover);
+    outline: none;
+  }
+
+  .rail-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    transition: background var(--t), color var(--t);
+  }
+
+  .rail-btn:hover:not(:disabled) {
+    background: var(--bg-active);
+    color: var(--text);
+  }
+
+  .rail-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* Bottom-to-top so the label reads upward, the way a spine label does. */
+  .rail-label {
+    flex: 1;
+    min-height: 0;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 11.5px;
+    font-weight: 550;
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+  }
+
+  .rail-idx {
+    flex: none;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+  }
+
   .crumb {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    gap: 10px;
     height: 34px;
     padding: 0 16px;
     border-bottom: 1px solid var(--border);
@@ -802,6 +1044,7 @@
     align-items: center;
     gap: 5px;
     min-width: 0;
+    flex: 1;
     font-weight: 550;
     color: var(--text);
   }
@@ -835,6 +1078,25 @@
     flex: none;
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .crumb-collapse {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex: none;
+    margin-right: -6px;
+    border-radius: var(--radius-sm);
+    color: var(--text-faint);
+    transition: background var(--t), color var(--t);
+  }
+
+  .crumb-collapse:hover {
+    background: var(--bg-hover);
+    color: var(--text);
   }
 
   .table-wrap {
@@ -862,6 +1124,10 @@
     letter-spacing: 0.03em;
     text-transform: uppercase;
     color: var(--text-faint);
+    /* Never wrap: a two-line "MODULE / FOLDER" is what started all this. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   tbody tr {
@@ -906,25 +1172,18 @@
     color: var(--text-faint);
   }
 
-  .c-name {
-    width: 46%;
-  }
-
   .c-mod {
-    width: 26%;
     color: var(--text-muted);
     font-size: 12.5px;
   }
 
   .c-size {
-    width: 12%;
     color: var(--text-faint);
     font-size: 12.5px;
     font-variant-numeric: tabular-nums;
   }
 
   .c-time {
-    width: 16%;
     color: var(--text-faint);
     font-size: 12.5px;
   }
@@ -936,6 +1195,16 @@
     background: var(--accent-soft);
     color: var(--accent-text);
     flex: none;
+  }
+
+  /* Too narrow for the word: keep the signal, drop the label. */
+  .chip.nw.dot-only {
+    width: 7px;
+    min-width: 7px;
+    height: 7px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--accent);
   }
 
   .chip.ns {
