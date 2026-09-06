@@ -90,6 +90,32 @@ func runPapersCLI(args []string) int {
 	merged := papers.Merge(ax, s2)
 	fmt.Printf("\nMerged: %d unique papers (deduped by arXiv id)\n", len(merged))
 
+	// ------------------------------------------------------ venue ranking
+	prefs := venuePrefs()
+	fmt.Printf("\nRanking: prefer published = %v, %d top venues\n",
+		prefs.PreferPublished, len(prefs.TopVenues))
+	res, rerr := app.SearchPapersFiltered(query, "all", 20, false)
+	if rerr != nil {
+		fmt.Fprintln(os.Stderr, "ranked search: error:", rerr)
+	} else {
+		if res.Note != "" {
+			fmt.Println("note:", res.Note)
+		}
+		fmt.Println("Top 5 by Score:")
+		for i, p := range res.Papers {
+			if i >= 5 {
+				break
+			}
+			fmt.Printf("  %d. [tier %d · %s] %s\n     %d cites · %s · %s\n",
+				i+1, p.VenueTier, p.VenueShort, truncate(p.Title, 66),
+				p.CitationCount, p.Source, p.URL)
+		}
+		if pub, perr := app.SearchPapersFiltered(query, "all", 20, true); perr == nil {
+			fmt.Printf("Published only: %d of %d results survive the filter\n",
+				len(pub.Papers), len(res.Papers))
+		}
+	}
+
 	// --------------------------------------------------------------- digest
 	fmt.Println("\nBuilding today's digest…")
 	d, err := app.GetPaperDigest("")
@@ -260,6 +286,9 @@ func printPapers(ps []papers.Paper) {
 		fmt.Printf("  %d. [%s] %s\n     %s\n     %d %s · %d citations · %s\n",
 			i+1, p.ID, truncate(p.Title, 70), truncate(authors, 70),
 			p.Year, p.Venue, p.CitationCount, p.URL)
+		if p.Comment != "" {
+			fmt.Printf("     comment: %s\n", truncate(p.Comment, 90))
+		}
 		if p.TLDR != "" {
 			fmt.Printf("     TLDR: %s\n", truncate(p.TLDR, 100))
 		}
