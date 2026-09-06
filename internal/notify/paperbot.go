@@ -50,6 +50,10 @@ type PaperBot struct {
 	chatID  string
 	running bool
 	waiters []chan string
+	ext     PaperExt
+	// lists caches the numbered listings per chat. The kv table is the durable
+	// copy; this map only saves a read on the hot path.
+	lists map[string]PaperList
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -71,6 +75,21 @@ func (b *PaperBot) SetConfig(cfg config.Settings, client *telegram.Client) {
 	if client != nil {
 		b.client = client
 	}
+}
+
+// SetExt installs the richer command handler (/search, /download, /library,
+// /done, /start-reading). Safe to call after Start; nil leaves the bot with
+// only the digest-era commands.
+func (b *PaperBot) SetExt(ext PaperExt) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.ext = ext
+}
+
+func (b *PaperBot) extension() PaperExt {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.ext
 }
 
 // Running reports whether the poll loop is alive.
@@ -232,10 +251,93 @@ func (b *PaperBot) dispatch(ctx context.Context, u telegram.Update) {
 }
 
 func (b *PaperBot) help() string {
+	// The extended command set has its own help; the digest-only hook is what
+	// an app without a PaperExt supplies.
+	if b.extension() != nil {
+		return PaperHelpMessage()
+	}
 	if b.Help != nil {
 		return b.Help()
 	}
 	return "/paper /save &lt;n&gt; /reading /help"
+}
+
+// ------------------------------------------------------------- list memory
+
+// listKey names the kv row holding a chat's last numbered listing. Library
+// listings live under their own key so /done <n> keeps meaning the library
+// even after a later /search.
+func listKey(chatID, kind string) string {
+	if kind == ListLibrary {
+		return "paperbot_lib_" + chatID
+	}
+	return "paperbot_list_" + chatID
+}
+
+// rememberList records a numbered listing, in memory and in the kv table so the
+// numbering survives a restart.
+func (b *PaperBot) rememberList(chatID string, l PaperList) {
+	key := listKey(chatID, l.Kind)
+	b.mu.Lock()
+	if b.lists == nil {
+		b.lists = map[string]PaperList{}
+	}
+	b.lists[key] = l
+	b.mu.Unlock()
+	if b.Store != nil {
+		_ = b.Store.SetKV(key, l.encode())
+	}
+}
+
+// lastList returns the chat's most recent listing of the given kind
+// (ListLibrary, or "" for "search results or digest, whichever came last").
+func (b *PaperBot) lastList(chatID, kind string) (PaperList, bool) {
+	key := listKey(chatID, kind)
+	b.mu.Lock()
+	l, ok := b.lists[key]
+	b.mu.Unlock()
+	if ok && len(l.IDs) > 0 {
+		return l, true
+	}
+	if b.Store == nil {
+		return PaperList{}, false
+	}
+	raw, err := b.Store.GetKV(key)
+	if err != nil {
+		return PaperList{}, false
+	}
+	l, ok = decodePaperList(raw)
+	if !ok {
+		return PaperList{}, false
+	}
+	b.mu.Lock()
+	if b.lists == nil {
+		b.lists = map[string]PaperList{}
+	}
+	b.lists[key] = l
+	b.mu.Unlock()
+	return l, true
+}
+
+// pick resolves "<n>" against a remembered listing, returning the reply text to
+// send when it cannot.
+func (b *PaperBot) pick(chatID, kind, cmd, args string) (id, title string, errMsg string) {
+	n, err := strconv.Atoi(strings.TrimSpace(args))
+	if err != nil || n <= 0 {
+		return "", "", "Usage: <code>" + telegram.EscapeHTML(cmd) + " &lt;n&gt;</code>"
+	}
+	l, ok := b.lastList(chatID, kind)
+	if !ok {
+		if kind == ListLibrary {
+			return "", "", NoLibraryListMessage(cmd)
+		}
+		return "", "", NoListMessage(cmd)
+	}
+	id, title, ok = l.Item(n)
+	if !ok {
+		return "", "", OutOfRangeMessage(n, len(l.IDs))
+	}
+	return id, title, ""
 }
 
 func (b *PaperBot) handle(ctx context.Context, chatID, cmd, args string) {
@@ -244,52 +346,158 @@ func (b *PaperBot) handle(ctx context.Context, chatID, cmd, args string) {
 			log.Printf("nussync: paper command %s: %v", cmd, r)
 		}
 	}()
+	switch cmd {
+	case "/paper":
+		b.reply(ctx, chatID, "🔎 Building today's digest…")
+	case "/search":
+		b.reply(ctx, chatID, "🔎 Searching…")
+	case "/download":
+		b.reply(ctx, chatID, "⬇️ Downloading…")
+	}
+	b.reply(ctx, chatID, b.Handle(ctx, chatID, cmd, args))
+}
+
+func fail(err error) string { return "❌ " + telegram.EscapeHTML(err.Error()) }
+
+const unavailable = "Papers are not available right now."
+
+// Handle runs one command and returns the reply body as Telegram HTML. It is
+// exported so `nussync --papers-bot-test "<cmd>"` can print the reply instead
+// of sending it; the poll loop wraps it in handle above.
+func (b *PaperBot) Handle(ctx context.Context, chatID, cmd, args string) string {
+	ext := b.extension()
 
 	switch cmd {
 	case "/paper":
 		if b.Digest == nil {
-			b.reply(ctx, chatID, "Papers are not available right now.")
-			return
+			return unavailable
 		}
-		b.reply(ctx, chatID, "🔎 Building today's digest…")
 		msg, err := b.Digest(ctx)
 		if err != nil {
-			b.reply(ctx, chatID, "❌ "+telegram.EscapeHTML(err.Error()))
-			return
+			return fail(err)
 		}
-		b.reply(ctx, chatID, msg)
+		// Remember the digest's numbering so /save and /download index into it.
+		if ext != nil {
+			if items, e := ext.DigestItems(ctx); e == nil && len(items) > 0 {
+				b.rememberList(chatID, NewPaperList(ListDigest, "", items))
+			}
+		}
+		return msg
+
+	case "/search":
+		if ext == nil {
+			return unavailable
+		}
+		q := strings.TrimSpace(args)
+		if q == "" {
+			return "Usage: <code>/search &lt;query&gt;</code>"
+		}
+		items, err := ext.SearchPapers(ctx, q, SearchLimit)
+		if err != nil {
+			return fail(err)
+		}
+		if len(items) > SearchLimit {
+			items = items[:SearchLimit]
+		}
+		if len(items) > 0 {
+			b.rememberList(chatID, NewPaperList(ListSearch, q, items))
+		}
+		return SearchResultsMessage(q, items)
 
 	case "/save":
-		n, err := strconv.Atoi(strings.TrimSpace(args))
-		if err != nil || n <= 0 {
-			b.reply(ctx, chatID, "Usage: <code>/save &lt;n&gt;</code> — the number from the last digest.")
-			return
+		if ext == nil {
+			// Digest-only fallback: the app indexes into its own last digest.
+			n, err := strconv.Atoi(strings.TrimSpace(args))
+			if err != nil || n <= 0 || b.Save == nil {
+				return "Usage: <code>/save &lt;n&gt;</code> — the number from the last digest."
+			}
+			msg, e := b.Save(ctx, n)
+			if e != nil {
+				return fail(e)
+			}
+			return msg
 		}
-		if b.Save == nil {
-			b.reply(ctx, chatID, "Papers are not available right now.")
-			return
+		id, title, bad := b.pick(chatID, "", cmd, args)
+		if bad != "" {
+			return bad
 		}
-		msg, err := b.Save(ctx, n)
+		saved, err := ext.SavePaper(ctx, id)
 		if err != nil {
-			b.reply(ctx, chatID, "❌ "+telegram.EscapeHTML(err.Error()))
-			return
+			return fail(err)
 		}
-		b.reply(ctx, chatID, msg)
+		if strings.TrimSpace(saved) != "" {
+			title = saved
+		}
+		n, _ := strconv.Atoi(strings.TrimSpace(args))
+		return SavedMessage(n, title)
+
+	case "/download":
+		if ext == nil {
+			return unavailable
+		}
+		id, title, bad := b.pick(chatID, "", cmd, args)
+		if bad != "" {
+			return bad
+		}
+		name, err := ext.DownloadPaperPDF(ctx, id)
+		if err != nil {
+			return fail(err)
+		}
+		return DownloadedMessage(title, name)
+
+	case "/library":
+		if ext == nil {
+			return unavailable
+		}
+		status, ok := NormalizeStatus(args)
+		if !ok {
+			return "Usage: <code>/library [toread|reading|done]</code>"
+		}
+		items, err := ext.LibraryList(ctx, status, LibraryLimit)
+		if err != nil {
+			return fail(err)
+		}
+		if len(items) > LibraryLimit {
+			items = items[:LibraryLimit]
+		}
+		if len(items) > 0 {
+			b.rememberList(chatID, NewPaperList(ListLibrary, status, items))
+		}
+		return LibraryMessage(status, items)
+
+	case "/done", "/start-reading", "/read":
+		if ext == nil {
+			return unavailable
+		}
+		status := "reading"
+		if cmd == "/done" {
+			status = "done"
+		}
+		id, title, bad := b.pick(chatID, ListLibrary, cmd, args)
+		if bad != "" {
+			return bad
+		}
+		got, err := ext.SetPaperStatus(ctx, id, status)
+		if err != nil {
+			return fail(err)
+		}
+		if strings.TrimSpace(got) != "" {
+			title = got
+		}
+		return StatusChangedMessage(title, status)
 
 	case "/reading":
 		if b.Reading == nil {
-			b.reply(ctx, chatID, "Papers are not available right now.")
-			return
+			return unavailable
 		}
 		msg, err := b.Reading(ctx)
 		if err != nil {
-			b.reply(ctx, chatID, "❌ "+telegram.EscapeHTML(err.Error()))
-			return
+			return fail(err)
 		}
-		b.reply(ctx, chatID, msg)
+		return msg
 
 	default: // /help, /start, anything else
-		b.reply(ctx, chatID, b.help())
+		return b.help()
 	}
 }
 

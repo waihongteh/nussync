@@ -41,6 +41,8 @@ func runCLI(mode string) int {
 		return runStudyCLI(os.Args[2:])
 	case "--papers-test":
 		return runPapersCLI(os.Args[2:])
+	case "--papers-bot-test":
+		return runPaperBotCLI(os.Args[2:])
 	}
 	return 2
 }

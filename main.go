@@ -33,13 +33,15 @@ Usage:
   nussync --papers-test "<query>" [--digest-send]
                           search arXiv + Semantic Scholar, build today's
                           digest and download one PDF
+  nussync --papers-bot-test "/search <query>"
+                          run one paper-bot command and print the reply
 `
 
 func main() {
 	// CLI modes run headless and exit; useful for testing without the GUI.
 	for _, arg := range os.Args[1:] {
 		switch arg {
-		case "--sync", "--check", "--notify-test", "--pair", "--study-test", "--papers-test":
+		case "--sync", "--check", "--notify-test", "--pair", "--study-test", "--papers-test", "--papers-bot-test":
 			os.Exit(runCLI(arg))
 		case "-h", "--help":
 			fmt.Print(cliHelp)

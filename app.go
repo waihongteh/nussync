@@ -118,6 +118,9 @@ func (a *App) startup(ctx context.Context) {
 	if err := a.papersInit(); err != nil {
 		log.Printf("nussync: papers: %v", err)
 	}
+	// The extended /search, /download and /library commands live in
+	// app_paperbot.go and are attached once the paper bot exists.
+	a.installPaperBotExt()
 
 	// One getUpdates consumer for the whole process; PairTelegram waits on it.
 	a.bot = notify.NewBot(a.st, a.telegram, cfg)
