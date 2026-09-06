@@ -287,6 +287,7 @@ func entryToPaper(e atomEntry) Paper {
 		PDFURL:      "https://arxiv.org/pdf/" + base,
 		PublishedAt: strings.TrimSpace(e.Published),
 		Source:      "arxiv",
+		Comment:     strings.TrimSpace(collapseSpace(e.Comment)),
 	}
 	for _, a := range e.Authors {
 		if n := collapseSpace(a.Name); n != "" {

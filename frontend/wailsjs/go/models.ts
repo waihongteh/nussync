@@ -106,6 +106,9 @@ export namespace main {
 	    PDFURL: string;
 	    PublishedAt: string;
 	    Source: string;
+	    VenueTier: number;
+	    VenueShort: string;
+	    Published: boolean;
 	    InLibrary: boolean;
 	    Status: string;
 	
@@ -130,6 +133,9 @@ export namespace main {
 	        this.PDFURL = source["PDFURL"];
 	        this.PublishedAt = source["PublishedAt"];
 	        this.Source = source["Source"];
+	        this.VenueTier = source["VenueTier"];
+	        this.VenueShort = source["VenueShort"];
+	        this.Published = source["Published"];
 	        this.InLibrary = source["InLibrary"];
 	        this.Status = source["Status"];
 	    }
@@ -387,6 +393,9 @@ export namespace main {
 	    PDFURL: string;
 	    PublishedAt: string;
 	    Source: string;
+	    VenueTier: number;
+	    VenueShort: string;
+	    Published: boolean;
 	    Status: string;
 	    Page: number;
 	    Pages: number;
@@ -421,6 +430,9 @@ export namespace main {
 	        this.PDFURL = source["PDFURL"];
 	        this.PublishedAt = source["PublishedAt"];
 	        this.Source = source["Source"];
+	        this.VenueTier = source["VenueTier"];
+	        this.VenueShort = source["VenueShort"];
+	        this.Published = source["Published"];
 	        this.Status = source["Status"];
 	        this.Page = source["Page"];
 	        this.Pages = source["Pages"];
@@ -469,6 +481,9 @@ export namespace main {
 	    PDFURL: string;
 	    PublishedAt: string;
 	    Source: string;
+	    VenueTier: number;
+	    VenueShort: string;
+	    Published: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Paper(source);
@@ -491,6 +506,9 @@ export namespace main {
 	        this.PDFURL = source["PDFURL"];
 	        this.PublishedAt = source["PublishedAt"];
 	        this.Source = source["Source"];
+	        this.VenueTier = source["VenueTier"];
+	        this.VenueShort = source["VenueShort"];
+	        this.Published = source["Published"];
 	    }
 	}
 	export class PaperDigest {
@@ -530,6 +548,7 @@ export namespace main {
 	export class PaperSearchResult {
 	    Papers: Paper[];
 	    Total: number;
+	    Note: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new PaperSearchResult(source);
@@ -539,6 +558,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Papers = this.convertValues(source["Papers"], Paper);
 	        this.Total = source["Total"];
+	        this.Note = source["Note"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -720,6 +740,8 @@ export namespace main {
 	    PaperCategories: string[];
 	    PaperDigestHour: number;
 	    NotifyPapers: boolean;
+	    PaperTopVenues: string[];
+	    PaperPreferPublished: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -748,6 +770,8 @@ export namespace main {
 	        this.PaperCategories = source["PaperCategories"];
 	        this.PaperDigestHour = source["PaperDigestHour"];
 	        this.NotifyPapers = source["NotifyPapers"];
+	        this.PaperTopVenues = source["PaperTopVenues"];
+	        this.PaperPreferPublished = source["PaperPreferPublished"];
 	    }
 	}
 	export class Stats {

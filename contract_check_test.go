@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"nussync/internal/config"
+	"nussync/internal/papers"
+)
 
 // TestContractSignatures fails to compile if any method in
 // docs/API_CONTRACT.md is missing or has a different signature.
@@ -43,25 +48,26 @@ func TestContractSignatures(t *testing.T) {
 		_ func()                        = a.ToggleWindow
 
 		// docs/CONTRACT_PAPERS.md
-		_ func(string, string, int) (PaperSearchResult, error) = a.SearchPapers
-		_ func(string) (Paper, error)                          = a.GetPaper
-		_ func(Paper) (LibraryPaper, error)                    = a.AddPaperToLibrary
-		_ func(string) error                                   = a.RemovePaperFromLibrary
-		_ func(string) ([]LibraryPaper, error)                 = a.GetLibrary
-		_ func(LibraryPaper) (LibraryPaper, error)             = a.UpdateLibraryPaper
-		_ func(string) (LibraryPaper, error)                   = a.DownloadPaperPDF
-		_ func(string, int) ([]CitationLink, error)            = a.GetCitations
-		_ func(string, int) ([]CitationLink, error)            = a.GetReferences
-		_ func(int) ([]Paper, error)                           = a.GetRecommendations
-		_ func(string) (PaperDigest, error)                    = a.GetPaperDigest
-		_ func() error                                         = a.SendPaperDigestNow
-		_ func([]string) (string, error)                       = a.ExportBibTeX
-		_ func(string) error                                   = a.OpenScholar
-		_ func(string, string) (string, error)                 = a.StartPaperSummary
-		_ func(string) (PaperSummary, error)                   = a.GetPaperSummary
-		_ func() TelegramStatus                                = a.GetPaperTelegramStatus
-		_ func() (string, error)                               = a.PairPaperTelegram
-		_ func() error                                         = a.SendPaperTestTelegram
+		_ func(string, string, int) (PaperSearchResult, error)       = a.SearchPapers
+		_ func(string, string, int, bool) (PaperSearchResult, error) = a.SearchPapersFiltered
+		_ func(string) (Paper, error)                                = a.GetPaper
+		_ func(Paper) (LibraryPaper, error)                          = a.AddPaperToLibrary
+		_ func(string) error                                         = a.RemovePaperFromLibrary
+		_ func(string) ([]LibraryPaper, error)                       = a.GetLibrary
+		_ func(LibraryPaper) (LibraryPaper, error)                   = a.UpdateLibraryPaper
+		_ func(string) (LibraryPaper, error)                         = a.DownloadPaperPDF
+		_ func(string, int) ([]CitationLink, error)                  = a.GetCitations
+		_ func(string, int) ([]CitationLink, error)                  = a.GetReferences
+		_ func(int) ([]Paper, error)                                 = a.GetRecommendations
+		_ func(string) (PaperDigest, error)                          = a.GetPaperDigest
+		_ func() error                                               = a.SendPaperDigestNow
+		_ func([]string) (string, error)                             = a.ExportBibTeX
+		_ func(string) error                                         = a.OpenScholar
+		_ func(string, string) (string, error)                       = a.StartPaperSummary
+		_ func(string) (PaperSummary, error)                         = a.GetPaperSummary
+		_ func() TelegramStatus                                      = a.GetPaperTelegramStatus
+		_ func() (string, error)                                     = a.PairPaperTelegram
+		_ func() error                                               = a.SendPaperTestTelegram
 
 		_ func(int, string, string) (ChatSession, error) = a.StartChat
 		_ func(string, string) (string, error)           = a.SendChat
@@ -69,4 +75,20 @@ func TestContractSignatures(t *testing.T) {
 		_ func(string) ([]ChatMessage, error)            = a.GetChatMessages
 		_ func(string) error                             = a.DeleteChat
 	)
+}
+
+// TestTopVenueDefaultsMatch guards the duplicated tier-2 venue list: config
+// cannot import internal/papers (that would close a papers -> sync -> config
+// import cycle), so the shipped default is written out in both places.
+func TestTopVenueDefaultsMatch(t *testing.T) {
+	a := config.DefaultTopVenues()
+	b := papers.DefaultTopVenues()
+	if len(a) != len(b) {
+		t.Fatalf("config has %d default top venues, papers has %d", len(a), len(b))
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			t.Errorf("top venue %d: config %q, papers %q", i, a[i], b[i])
+		}
+	}
 }

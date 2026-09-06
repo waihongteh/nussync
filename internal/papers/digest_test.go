@@ -50,7 +50,7 @@ func TestBuildDigest(t *testing.T) {
 	lib := map[string]bool{"arxiv:4": true}
 
 	d := BuildDigest("2026-09-06", fresh, kw, recs, "",
-		func(id string) bool { return lib[id] }, 2, 2)
+		func(id string) bool { return lib[id] }, 2, 2, DefaultVenuePrefs())
 
 	if d.Date != "2026-09-06" {
 		t.Errorf("date = %q", d.Date)
@@ -120,5 +120,43 @@ func TestDigestMessageStaysUnderCap(t *testing.T) {
 func TestDigestMessageEmpty(t *testing.T) {
 	if got := DigestMessage(Digest{Date: "2026-09-06"}); !strings.Contains(got, "nothing new") {
 		t.Errorf("empty digest = %q", got)
+	}
+}
+
+func TestBuildDigestRanksButKeepsFreshPreprints(t *testing.T) {
+	kw := []string{"unlearning"}
+	// arXiv "new today" order: preprints first, two published papers last.
+	fresh := []Paper{
+		{ID: "arxiv:p1", Title: "Unlearning preprint one", Venue: "arXiv cs.LG"},
+		{ID: "arxiv:p2", Title: "Unlearning preprint two", Venue: "arXiv cs.LG"},
+		{ID: "arxiv:p3", Title: "Unlearning preprint three", Venue: "arXiv cs.LG"},
+		{ID: "arxiv:v1", Title: "Unlearning at NeurIPS", Comment: "Accepted at NeurIPS 2025"},
+		{ID: "arxiv:v2", Title: "Unlearning in a journal", Venue: "Nature Machine Intelligence"},
+	}
+	d := BuildDigest("2026-09-06", fresh, kw, nil, "", nil, 4, 0, DefaultVenuePrefs())
+
+	if len(d.Papers) != 4 {
+		t.Fatalf("got %d papers, want 4: %+v", len(d.Papers), d.Papers)
+	}
+	if d.Papers[0].ID != "arxiv:v1" || d.Papers[0].VenueTier != 2 {
+		t.Errorf("papers[0] = %q tier %d, want the NeurIPS paper first",
+			d.Papers[0].ID, d.Papers[0].VenueTier)
+	}
+	preprints := 0
+	for _, p := range d.Papers {
+		if p.VenueTier == 0 {
+			preprints++
+		}
+	}
+	if preprints < MinFreshPreprints {
+		t.Errorf("digest kept %d preprints, want at least %d", preprints, MinFreshPreprints)
+	}
+	if len(d.Reason) != len(d.Papers) {
+		t.Fatalf("Reason has %d entries, Papers %d", len(d.Reason), len(d.Papers))
+	}
+	for i, p := range d.Papers {
+		if !strings.Contains(d.Reason[i], "unlearning") {
+			t.Errorf("reason[%d] for %s = %q", i, p.ID, d.Reason[i])
+		}
 	}
 }

@@ -137,6 +137,13 @@ export const api = {
   // ---------------------------------------------------------------- papers
   searchPapers: (query: string, source: string, limit: number): Promise<PaperSearchResult> =>
     call('SearchPapers', query, source, limit),
+  /** SearchPapers plus the "Published only" filter (drops tier-0 preprints). */
+  searchPapersFiltered: (
+    query: string,
+    source: string,
+    limit: number,
+    publishedOnly: boolean,
+  ): Promise<PaperSearchResult> => call('SearchPapersFiltered', query, source, limit, publishedOnly),
   getPaper: (id: string): Promise<Paper> => call('GetPaper', id),
   addPaperToLibrary: (p: Paper): Promise<LibraryPaper> => call('AddPaperToLibrary', p),
   removePaperFromLibrary: (id: string): Promise<void> => call('RemovePaperFromLibrary', id),

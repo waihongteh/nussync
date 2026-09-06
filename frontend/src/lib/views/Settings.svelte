@@ -37,6 +37,7 @@
 
   let keywordInput = $state('');
   let categoryInput = $state('');
+  let venueInput = $state('');
   let showPaperToken = $state(false);
   let paperTg = $state<TelegramStatus>({ Configured: false, ChatID: '', BotName: '@nuspapertracker_bot' });
   let paperPairing = $state(false);
@@ -61,7 +62,9 @@
       .catch(() => {});
   });
 
-  function addChip(list: 'PaperKeywords' | 'PaperCategories', raw: string) {
+  type ChipList = 'PaperKeywords' | 'PaperCategories' | 'PaperTopVenues';
+
+  function addChip(list: ChipList, raw: string) {
     if (!draft) return;
     const v = raw.trim().replace(/,+$/, '');
     if (!v) return;
@@ -69,7 +72,7 @@
     if (!cur.includes(v)) draft[list] = [...cur, v];
   }
 
-  function removeChip(list: 'PaperKeywords' | 'PaperCategories', v: string) {
+  function removeChip(list: ChipList, v: string) {
     if (!draft) return;
     draft[list] = (draft[list] ?? []).filter((x) => x !== v);
   }
@@ -771,6 +774,51 @@
               />
             </div>
           </div>
+
+          <div class="field">
+            <span class="lbl">Top venues</span>
+            <div class="chips">
+              {#each draft.PaperTopVenues ?? [] as v (v)}
+                <span class="chip removable">
+                  {v}
+                  <button class="chip-x" onclick={() => removeChip('PaperTopVenues', v)} aria-label="Remove {v}" type="button">
+                    <Icon name="x" size={10} />
+                  </button>
+                </span>
+              {/each}
+              <input
+                class="chip-input"
+                type="text"
+                placeholder="add NeurIPS"
+                bind:value={venueInput}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    addChip('PaperTopVenues', venueInput);
+                    venueInput = '';
+                  }
+                }}
+                onblur={() => {
+                  addChip('PaperTopVenues', venueInput);
+                  venueInput = '';
+                }}
+                spellcheck="false"
+              />
+            </div>
+            <span class="help">
+              Papers from these venues get the gold badge and rank first. Anything else with a
+              detected venue counts as published; workshop papers rank one tier lower.
+            </span>
+          </div>
+
+          <label class="switch-row">
+            <input type="checkbox" bind:checked={draft.PaperPreferPublished} />
+            <span class="track"><span class="knob"></span></span>
+            <span class="switch-text">
+              <span class="switch-title">Prefer published papers</span>
+              <span class="help">Rank peer-reviewed work above preprints in search, the digest and recommendations.</span>
+            </span>
+          </label>
 
           <label class="field narrow">
             <span class="lbl">Digest hour</span>

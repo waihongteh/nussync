@@ -26,6 +26,9 @@ type Paper struct {
     CitationCount int; URL string; PDFURL string
     PublishedAt string /*RFC3339 (arXiv) or YYYY-MM-DD (S2)*/
     Source string /*"arxiv" | "s2"*/
+    VenueTier int /*2 top venue, 1 published, 0 preprint/unknown — DERIVED*/
+    VenueShort string /*badge label: "NeurIPS 2025" | "published" | "preprint"*/
+    Published bool /*VenueTier >= 1*/
 }
 type LibraryPaper struct {
     Paper                       // EMBEDDED: its fields are flattened in JSON/TS
@@ -36,7 +39,10 @@ type LibraryPaper struct {
     AddedAt string; UpdatedAt string; ReadAt string /*set when Status becomes "done"*/
     FileID int /*synthetic files row, 0 until downloaded — pass to Study/chat*/
 }
-type PaperSearchResult struct { Papers []Paper; Total int }
+type PaperSearchResult struct {
+    Papers []Paper; Total int
+    Note string /*"" normally; set when the result is degraded (S2 rate limited)*/
+}
 type CitationLink struct { Paper; InLibrary bool; Status string /*"" when not saved*/ }
 type PaperDigest struct { Date string /*YYYY-MM-DD*/; Papers []Paper; Reason []string /*Reason[i] explains Papers[i]*/ }
 type PaperSummary struct { PaperID string; Markdown string; CreatedAt string; Model string }
@@ -63,12 +69,22 @@ PaperKeywords []string    // default: machine unlearning, LLM unlearning,
 PaperCategories []string  // default ["cs.CL","cs.LG","cs.AI"]
 PaperDigestHour int       // 0-23 local, default 9
 NotifyPapers bool         // default true
+PaperTopVenues []string   // tier-2 venues; default NeurIPS, ICML, ICLR, ACL,
+                          // EMNLP, NAACL, EACL, COLING, AAAI, IJCAI, COLM,
+                          // TACL, JMLR, TMLR, CVPR, ICCV, ECCV, KDD, WWW,
+                          // SIGIR, USENIX Security, IEEE S&P, CCS, NDSS,
+                          // ICSE, FSE. Empty falls back to that list.
+PaperPreferPublished bool // default true; turns the tier weight in Score on
 ```
 
 ## Methods on App — papers
 ```
 SearchPapers(query string, source string, limit int) (PaperSearchResult, error)
+    // Wrapper for SearchPapersFiltered(query, source, limit, false).
+SearchPapersFiltered(query, source string, limit int, publishedOnly bool) (PaperSearchResult, error)
     // source "all" | "arxiv" | "s2" ("" = all). limit<=0 -> 20, capped at 100.
+    // Results are RANKED best-first by papers.Score (see "Venue ranking").
+    // publishedOnly drops every VenueTier 0 row and rewrites Total.
     // Semantic Scholar's public tier rate-limits hard: when source is "all" an
     // S2 failure is NON-FATAL and arXiv-only results come back. Duplicates are
     // merged on the versionless arXiv id, the arXiv row winning and inheriting
@@ -90,6 +106,7 @@ GetReferences(id string, limit int) ([]CitationLink, error)  // Semantic Scholar
 GetRecommendations(limit int) ([]Paper, error)
     // S2 recommendations seeded with the 5 newest library papers; falls back to
     // an arXiv keyword search when S2 is unavailable or the library is empty.
+    // Sorted by Score.
 GetPaperDigest(date string) (PaperDigest, error)   // "" = today; cached per day
 SendPaperDigestNow() error                          // pushes it to the paper bot
 ExportBibTeX(ids []string) (string, error)          // empty ids = whole library
@@ -160,7 +177,30 @@ SendPaperTestTelegram() error
   listed, and `GetCourses` hides the row while it owns no files.
 - **Digest**: top 5 keyword-matching new arXiv papers plus up to 3
   recommendations not already in the library, cached per day, rendered as HTML
-  under 4000 bytes.
+  under 4000 bytes. Both halves are ordered by Score, except that the arXiv half
+  always keeps at least `papers.MinFreshPreprints` (2) tier-0 papers — "new
+  today" is almost always preprints, and a purely score-ordered digest goes
+  stale.
+- **Venue ranking** (`internal/papers/venue.go`): `VenueTier`/`VenueShort`/
+  `Published` are DERIVED on every read (`toPaper`, `toLibraryPaper`), never
+  stored — `papers_library` keeps only `venue`. When a venue is found solely in
+  the arXiv comment, the detected short name is written back into `Venue` so it
+  survives the round-trip. Evidence, strongest first: S2 `venue` /
+  `publicationVenue.name` / `journal.name`, arXiv `<arxiv:journal_ref>`, arXiv
+  `<arxiv:comment>` ("Accepted at/to X", "To appear in X", "Published in X",
+  "X camera-ready"), and — weakest — a non-arXiv DOI (tier 1, label
+  "published"). Names are normalised to a canonical short form (NIPS ->
+  NeurIPS, "Advances in Neural Information Processing Systems" -> NeurIPS, …).
+  A venue containing "workshop" is tier 1, never tier 2.
+  `Score(p, prefs)` = tier weight (2 -> +100, 1 -> +40, only when
+  `PaperPreferPublished`) + `log(citations+1)*8` + a recency bonus (<= 12
+  months, +15 decaying linearly). `SortByScore` adds up to +5 for the source's
+  own ordering, so query relevance survives as a tie-break. A heavily cited
+  preprint still outranks a lightly cited journal paper: the tier is a thumb on
+  the scale, not a veto.
+- **S2 rate limiting**: when Semantic Scholar 429s during a search, venues can
+  only come from the arXiv comments; the result carries that explanation in
+  `PaperSearchResult.Note` and the Papers view shows it above the results.
 - **Telegram**: the paper bot is a *second* bot (token from `.env`
   `PAPER_TRACKER_TELEGRAM_TOKEN`, imported into `PaperTelegramToken` on first
   run or whenever it is empty) with its own chat id and pairing. Commands:

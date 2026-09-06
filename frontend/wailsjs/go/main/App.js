@@ -178,6 +178,10 @@ export function Init(arg1) {
   return window['go']['main']['App']['Init'](arg1);
 }
 
+export function MarkAllAnnouncementsRead() {
+  return window['go']['main']['App']['MarkAllAnnouncementsRead']();
+}
+
 export function MarkAnnouncementRead(arg1) {
   return window['go']['main']['App']['MarkAnnouncementRead'](arg1);
 }
@@ -228,6 +232,10 @@ export function Search(arg1, arg2) {
 
 export function SearchPapers(arg1, arg2, arg3) {
   return window['go']['main']['App']['SearchPapers'](arg1, arg2, arg3);
+}
+
+export function SearchPapersFiltered(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SearchPapersFiltered'](arg1, arg2, arg3, arg4);
 }
 
 export function SendChat(arg1, arg2) {

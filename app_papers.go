@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	gosync "sync"
+	"sync/atomic"
 	"time"
 
 	"nussync/internal/config"
@@ -51,6 +52,7 @@ func (a *App) papersInit() error {
 	if a.st == nil {
 		return errors.New("not initialised")
 	}
+	setVenuePrefs(a.settings())
 	papersRT.once.Do(func() {
 		if err := a.st.MigratePapers(); err != nil {
 			papersRT.err = err
@@ -113,6 +115,27 @@ func paperBot() *notify.PaperBot {
 	return papersRT.bot
 }
 
+// venuePrefs is the snapshot of the ranking settings used by toPaper and
+// toLibraryPaper, which have no App receiver. It is refreshed by papersInit
+// and by papersApplySettings; the zero value falls back to the defaults.
+var venuePrefsVal atomic.Pointer[papers.VenuePrefs]
+
+func setVenuePrefs(cfg config.Settings) {
+	p := papers.VenuePrefs{
+		TopVenues:       cfg.PaperTopVenues,
+		PreferPublished: cfg.PaperPreferPublished,
+	}.Normalised()
+	venuePrefsVal.Store(&p)
+}
+
+// venuePrefs returns the current ranking settings.
+func venuePrefs() papers.VenuePrefs {
+	if p := venuePrefsVal.Load(); p != nil {
+		return *p
+	}
+	return papers.DefaultVenuePrefs()
+}
+
 // papersChanged emits the refresh event the Papers view listens on.
 func (a *App) papersChanged() { a.emit("papers:updated") }
 
@@ -121,11 +144,13 @@ func todayLocal() string { return time.Now().Local().Format("2006-01-02") }
 // ------------------------------------------------------------- conversions
 
 func toPaper(p papers.Paper) Paper {
+	papers.AnnotateVenue(&p, venuePrefs())
 	return Paper{
 		ID: p.ID, ArxivID: p.ArxivID, S2ID: p.S2ID, DOI: p.DOI, Title: p.Title,
 		Authors: p.Authors, Year: p.Year, Venue: p.Venue, Abstract: p.Abstract,
 		TLDR: p.TLDR, CitationCount: p.CitationCount, URL: p.URL,
 		PDFURL: p.PDFURL, PublishedAt: p.PublishedAt, Source: p.Source,
+		VenueTier: p.VenueTier, VenueShort: p.VenueShort, Published: p.Published,
 	}
 }
 
@@ -135,6 +160,7 @@ func fromPaper(p Paper) papers.Paper {
 		Authors: p.Authors, Year: p.Year, Venue: p.Venue, Abstract: p.Abstract,
 		TLDR: p.TLDR, CitationCount: p.CitationCount, URL: p.URL,
 		PDFURL: p.PDFURL, PublishedAt: p.PublishedAt, Source: p.Source,
+		VenueTier: p.VenueTier, VenueShort: p.VenueShort, Published: p.Published,
 	}
 }
 
@@ -147,13 +173,10 @@ func toPapers(ps []papers.Paper) []Paper {
 }
 
 func toLibraryPaper(r store.LibraryPaper) LibraryPaper {
+	// The venue tier is derived, not stored, so a library row is re-annotated
+	// on the way out — the settings may have changed since it was saved.
 	return LibraryPaper{
-		Paper: Paper{
-			ID: r.ID, ArxivID: r.ArxivID, S2ID: r.S2ID, DOI: r.DOI, Title: r.Title,
-			Authors: r.Authors, Year: r.Year, Venue: r.Venue, Abstract: r.Abstract,
-			TLDR: r.TLDR, CitationCount: r.CitationCount, URL: r.URL,
-			PDFURL: r.PDFURL, PublishedAt: r.PublishedAt, Source: r.Source,
-		},
+		Paper:  toPaper(libraryPaperToPapers(r)),
 		Status: r.Status, Page: r.Page, Pages: r.Pages, Stars: r.Stars,
 		Tags: r.Tags, Notes: r.Notes, KeyIdea: r.KeyIdea, LocalPath: r.LocalPath,
 		AddedAt: r.AddedAt, UpdatedAt: r.UpdatedAt, ReadAt: r.ReadAt, FileID: r.FileID,
@@ -184,10 +207,18 @@ func libraryPaperToPapers(r store.LibraryPaper) papers.Paper {
 
 // -------------------------------------------------------------------- search
 
-// SearchPapers queries arXiv, Semantic Scholar or both. Semantic Scholar's
-// public tier rate-limits aggressively, so an S2 failure is NOT fatal: the
-// arXiv results are returned on their own.
+// SearchPapers queries arXiv, Semantic Scholar or both, ranked best-first.
 func (a *App) SearchPapers(query string, source string, limit int) (PaperSearchResult, error) {
+	return a.SearchPapersFiltered(query, source, limit, false)
+}
+
+// SearchPapersFiltered is SearchPapers with the "Published only" filter: when
+// publishedOnly is set, preprints with no detectable venue are dropped.
+//
+// Semantic Scholar's public tier rate-limits aggressively, so an S2 failure is
+// NOT fatal: the arXiv results are returned on their own, with venues read from
+// the arXiv comments alone and a Note saying so.
+func (a *App) SearchPapersFiltered(query string, source string, limit int, publishedOnly bool) (PaperSearchResult, error) {
 	if err := a.papersInit(); err != nil {
 		return PaperSearchResult{}, err
 	}
@@ -209,9 +240,10 @@ func (a *App) SearchPapers(query string, source string, limit int) (PaperSearchR
 	defer cancel()
 
 	var (
-		ax, s2     []papers.Paper
-		total      int
-		firstError error
+		ax, s2        []papers.Paper
+		total         int
+		firstError    error
+		s2Unavailable bool
 	)
 	if source == "all" || source == "arxiv" {
 		ps, n, err := papersRT.arxiv.Search(ctx, query, limit, papers.SortRelevance)
@@ -227,7 +259,8 @@ func (a *App) SearchPapers(query string, source string, limit int) (PaperSearchR
 			if source == "s2" {
 				return PaperSearchResult{}, err
 			}
-			// Non-fatal: arXiv-only results.
+			// Non-fatal: arXiv-only results, venues from the comments.
+			s2Unavailable = true
 		} else {
 			s2 = ps
 			if n > total {
@@ -238,11 +271,21 @@ func (a *App) SearchPapers(query string, source string, limit int) (PaperSearchR
 	if len(ax) == 0 && len(s2) == 0 && firstError != nil {
 		return PaperSearchResult{}, firstError
 	}
-	merged := papers.Merge(ax, s2)
+	prefs := venuePrefs()
+	merged := papers.SortByScore(papers.Merge(ax, s2), prefs)
+	if publishedOnly {
+		merged = papers.FilterPublished(merged)
+		total = len(merged)
+	}
 	if total < len(merged) {
 		total = len(merged)
 	}
-	return PaperSearchResult{Papers: toPapers(merged), Total: total}, nil
+	res := PaperSearchResult{Papers: toPapers(merged), Total: total}
+	if s2Unavailable && len(ax) > 0 {
+		res.Note = "Semantic Scholar is rate-limited — venues were read from " +
+			"the arXiv comments only, so some published papers may show as preprints."
+	}
+	return res, nil
 }
 
 // GetPaper resolves one paper by id ("arxiv:…" or "s2:…"), preferring the
@@ -566,7 +609,7 @@ func (a *App) GetRecommendations(limit int) ([]Paper, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toPapers(ps), nil
+	return toPapers(papers.SortByScore(ps, venuePrefs())), nil
 }
 
 // recommendations returns suggestions and the reason line that describes where
@@ -665,7 +708,8 @@ func (a *App) buildDigest(ctx context.Context, date string) (papers.Digest, erro
 	lib, _ := a.st.LibraryIDs()
 	inLibrary := func(id string) bool { _, ok := lib[id]; return ok }
 
-	d := papers.BuildDigest(date, fresh, cfg.PaperKeywords, recs, recReason, inLibrary, 5, 3)
+	d := papers.BuildDigest(date, fresh, cfg.PaperKeywords, recs, recReason,
+		inLibrary, 5, 3, venuePrefs())
 	if blob, err := json.Marshal(d); err == nil {
 		_ = a.st.PaperDigestPut(date, string(blob))
 	}
@@ -945,6 +989,7 @@ func (a *App) SendPaperTestTelegram() error {
 
 // papersApplySettings re-points the paper bot after SaveSettings.
 func (a *App) papersApplySettings(cfg config.Settings) {
+	setVenuePrefs(cfg)
 	if bot := paperBot(); bot != nil {
 		bot.SetConfig(cfg, telegram.New(cfg.PaperTelegramToken))
 	}

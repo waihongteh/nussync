@@ -16,6 +16,8 @@
   const MODEL_KEY = 'nussync.study.model';
   const SOURCE_KEY = 'nussync.papers.source';
   const SORT_KEY = 'nussync.papers.sort';
+  const RESULT_SORT_KEY = 'nussync.papers.resultSort';
+  const PUBLISHED_KEY = 'nussync.papers.publishedOnly';
 
   const SOURCES = [
     { v: 'all', label: 'All' },
@@ -37,10 +39,14 @@
   ];
 
   const SORTS = [
-    { v: 'added', label: 'Recently added' },
+    { v: 'best', label: 'Best' },
     { v: 'citations', label: 'Most cited' },
     { v: 'year', label: 'Newest first' },
+    { v: 'added', label: 'Recently added' },
   ] as const;
+
+  /** Results have nothing to sort by "added", so they get the first three. */
+  const RESULT_SORTS = SORTS.filter((s) => s.v !== 'added');
 
   type Sort = (typeof SORTS)[number]['v'];
 
@@ -50,13 +56,16 @@
   let source = $state<string>(lsGet(SOURCE_KEY, 'all'));
   let results = $state<Paper[]>([]);
   let total = $state(0);
+  let note = $state('');
+  let publishedOnly = $state<boolean>(lsGet(PUBLISHED_KEY, false));
+  let resultSort = $state<Sort>(lsGet(RESULT_SORT_KEY, 'best'));
   let searching = $state(false);
   let searched = $state(false);
 
   let library = $state<LibraryPaper[]>([]);
   let libLoading = $state(true);
   let statusTab = $state<string>('all');
-  let sort = $state<Sort>(lsGet(SORT_KEY, 'added'));
+  let sort = $state<Sort>(lsGet(SORT_KEY, 'best'));
 
   let expanded = $state<Set<string>>(new Set());
   let openCards = $state<Set<string>>(new Set());
@@ -89,13 +98,27 @@
     return c;
   });
 
+  /**
+   * "Best" keeps whatever order the backend returned (it ranks by venue tier,
+   * citations and recency); the other sorts re-order client-side.
+   */
+  function applySort<T extends Paper>(list: T[], mode: Sort, added: (p: T) => number): T[] {
+    const sorted = [...list];
+    if (mode === 'citations') sorted.sort((a, b) => b.CitationCount - a.CitationCount);
+    else if (mode === 'year') sorted.sort((a, b) => b.Year - a.Year || b.CitationCount - a.CitationCount);
+    else if (mode === 'added') sorted.sort((a, b) => added(b) - added(a));
+    else sorted.sort((a, b) => b.VenueTier - a.VenueTier || b.CitationCount - a.CitationCount);
+    return sorted;
+  }
+
+  const visibleResults = $derived.by(() =>
+    // Backend order is already best-first, so "best" must not re-sort it.
+    resultSort === 'best' ? results : applySort(results, resultSort, () => 0),
+  );
+
   const visibleLibrary = $derived.by(() => {
     const list = statusTab === 'all' ? library : library.filter((p) => p.Status === statusTab);
-    const sorted = [...list];
-    if (sort === 'citations') sorted.sort((a, b) => b.CitationCount - a.CitationCount);
-    else if (sort === 'year') sorted.sort((a, b) => b.Year - a.Year || b.CitationCount - a.CitationCount);
-    else sorted.sort((a, b) => Date.parse(b.AddedAt) - Date.parse(a.AddedAt));
-    return sorted;
+    return applySort(list, sort, (p) => Date.parse(p.AddedAt) || 0);
   });
 
   $effect(() => {
@@ -103,6 +126,12 @@
   });
   $effect(() => {
     lsSet(SORT_KEY, sort);
+  });
+  $effect(() => {
+    lsSet(RESULT_SORT_KEY, resultSort);
+  });
+  $effect(() => {
+    lsSet(PUBLISHED_KEY, publishedOnly);
   });
 
   // -------------------------------------------------------------- load
@@ -184,13 +213,15 @@
     searching = true;
     searched = true;
     try {
-      const res = await api.searchPapers(q, source, 20);
+      const res = await api.searchPapersFiltered(q, source, 20, publishedOnly);
       results = res?.Papers ?? [];
       total = res?.Total ?? results.length;
+      note = res?.Note ?? '';
     } catch (err) {
       toast(`Search failed: ${errMsg(err)}`, 'error');
       results = [];
       total = 0;
+      note = '';
     } finally {
       searching = false;
     }
@@ -476,9 +507,19 @@
     return `${a.slice(0, 3).join(', ')} +${a.length - 3} more`;
   }
 
+  /** The venue badge: gold for a top venue, neutral once published, muted otherwise. */
+  function badge(p: Paper): { label: string; cls: string; title: string } {
+    const tier = p.VenueTier ?? 0;
+    const label = p.VenueShort || (tier > 0 ? p.Venue : 'preprint');
+    if (tier >= 2) return { label, cls: 'top', title: 'Published at a top venue' };
+    if (tier === 1) return { label, cls: 'pub', title: 'Peer-reviewed / published' };
+    return { label: label || 'preprint', cls: 'pre', title: 'Preprint — no venue found' };
+  }
+
   function metaLine(p: Paper): string {
-    const bits = [p.Year ? String(p.Year) : '', p.Venue].filter(Boolean);
-    return bits.join(' · ');
+    // The venue rides in the badge, so the meta line only carries what is left.
+    const venue = p.Venue && p.Venue !== p.VenueShort ? p.Venue : '';
+    return [p.Year ? String(p.Year) : '', venue].filter(Boolean).join(' · ');
   }
 
   function blurb(p: Paper): string {
@@ -527,6 +568,19 @@
         {/each}
       </div>
 
+      <button
+        class="chip filter"
+        class:on={publishedOnly}
+        onclick={() => {
+          publishedOnly = !publishedOnly;
+          if (searched) void runSearch();
+        }}
+        title="Only papers with a detected venue — drops preprints"
+        type="button"
+      >
+        <Icon name={publishedOnly ? 'check' : 'dot'} size={11} /> Published only
+      </button>
+
       <button class="btn" onclick={() => void runSearch()} disabled={!query.trim() || searching}>Search</button>
       <button class="btn" onclick={scholar} title="Google Scholar has no API — this just opens it in your browser">
         <Icon name="external" size={13} /> Open in Google Scholar
@@ -539,7 +593,18 @@
         <header class="block-head">
           <h2 class="section-title">Results</h2>
           <span class="faint count">{searching ? 'searching…' : `${results.length} of ${total}`}</span>
+          <div class="grow"></div>
+          <label class="sortwrap">
+            <Icon name="sort" size={13} />
+            <select class="select sortsel" bind:value={resultSort} aria-label="Sort results">
+              {#each RESULT_SORTS as s (s.v)}<option value={s.v}>{s.label}</option>{/each}
+            </select>
+          </label>
         </header>
+
+        {#if note}
+          <p class="note"><Icon name="info" size={12} /> {note}</p>
+        {/if}
 
         {#if searching}
           <div class="card"><div class="empty"><span class="spinner"></span> Searching…</div></div>
@@ -547,13 +612,15 @@
           <div class="card"><div class="empty">Nothing matched “{query}”. Try a broader phrase, or a different source.</div></div>
         {:else}
           <div class="cards">
-            {#each results as p (p.ID)}
+            {#each visibleResults as p (p.ID)}
               {@const inLib = libIDs.has(p.ID)}
+              {@const b = badge(p)}
               <article class="card rcard">
                 <h3 class="ptitle">{p.Title}</h3>
                 <p class="pauthors truncate">{authorLine(p)}</p>
                 <p class="pmeta">
-                  <span>{metaLine(p) || '—'}</span>
+                  <span class="chip venue {b.cls}" title={b.title}>{b.label}</span>
+                  {#if metaLine(p)}<span>{metaLine(p)}</span>{/if}
                   <span class="sep">·</span>
                   <span class="cites"><Icon name="quote" size={11} /> {p.CitationCount}</span>
                   <span class="chip src">{p.Source}</span>
@@ -625,6 +692,7 @@
             {@const open = openCards.has(p.ID)}
             {@const sum = summaries[p.ID]}
             {@const running = summaryJob?.paperID === p.ID}
+            {@const b = badge(p)}
             <article class="card lcard">
               <header class="lhead">
                 <label class="pick" title="Include in BibTeX export">
@@ -633,7 +701,10 @@
                 </label>
                 <button class="ltitle-btn" onclick={() => toggleCard(p.ID)}>
                   <h3 class="ptitle">{p.Title}</h3>
-                  <p class="pauthors truncate">{authorLine(p)} · {metaLine(p) || '—'}</p>
+                  <p class="pauthors truncate">
+                    <span class="chip venue {b.cls}" title={b.title}>{b.label}</span>
+                    {authorLine(p)}{metaLine(p) ? ` · ${metaLine(p)}` : ''}
+                  </p>
                 </button>
                 <span class="stars" aria-label="{p.Stars} of 5">
                   {#each [1, 2, 3, 4, 5] as n (n)}
@@ -808,10 +879,14 @@
                         <div class="empty">Nothing on record for this paper.</div>
                       {:else}
                         {#each drawerLinks as l (l.ID)}
+                          {@const lb = badge(l)}
                           <div class="link-row">
                             <div class="lr-main">
                               <span class="lr-title truncate">{l.Title}</span>
-                              <span class="lr-meta faint truncate">{authorLine(l)} · {metaLine(l)}</span>
+                              <span class="lr-meta faint truncate">
+                                <span class="chip venue {lb.cls}" title={lb.title}>{lb.label}</span>
+                                {authorLine(l)}
+                              </span>
                             </div>
                             <span class="chip cites"><Icon name="quote" size={10} /> {l.CitationCount}</span>
                             {#if l.InLibrary}
@@ -846,9 +921,13 @@
         <div class="empty">Add a few papers and recommendations show up here.</div>
       {:else}
         {#each recs as p (p.ID)}
+          {@const b = badge(p)}
           <div class="rail-row">
             <button class="rr-title" onclick={() => void openPaper(p)} title={p.Title}>{p.Title}</button>
-            <div class="rr-meta faint truncate">{metaLine(p)} · {p.CitationCount} cites</div>
+            <div class="rr-meta faint truncate">
+              <span class="chip venue {b.cls}" title={b.title}>{b.label}</span>
+              {p.CitationCount} cites
+            </div>
             <button class="btn sm" onclick={() => void add(p)} disabled={libIDs.has(p.ID) || busyIDs.has(p.ID)}>
               <Icon name={libIDs.has(p.ID) ? 'check' : 'plus'} size={11} />
               {libIDs.has(p.ID) ? 'Saved' : 'Add'}
@@ -867,9 +946,13 @@
         <div class="empty">No digest for today yet.</div>
       {:else}
         {#each digest.Papers ?? [] as p, i (p.ID)}
+          {@const b = badge(p)}
           <div class="rail-row">
             <button class="rr-title" onclick={() => void openPaper(p)} title={p.Title}>{p.Title}</button>
-            <div class="rr-meta faint truncate">{(digest?.Reason ?? [])[i] ?? metaLine(p)}</div>
+            <div class="rr-meta faint truncate">
+              <span class="chip venue {b.cls}" title={b.title}>{b.label}</span>
+              {(digest?.Reason ?? [])[i] ?? metaLine(p)}
+            </div>
             <button class="btn sm" onclick={() => void add(p)} disabled={libIDs.has(p.ID) || busyIDs.has(p.ID)}>
               <Icon name={libIDs.has(p.ID) ? 'check' : 'plus'} size={11} />
               {libIDs.has(p.ID) ? 'Saved' : 'Add'}
@@ -1117,6 +1200,63 @@
     align-items: center;
     gap: 3px;
     font-variant-numeric: tabular-nums;
+  }
+
+  .chip.venue {
+    height: 18px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Tier 2 — a venue on the user's top list. */
+  .chip.venue.top {
+    color: #8a6100;
+    background: color-mix(in srgb, #f5b301 22%, transparent);
+    border-color: color-mix(in srgb, #f5b301 55%, transparent);
+  }
+
+  :global([data-theme='dark']) .chip.venue.top {
+    color: #f0c25a;
+  }
+
+  /* Tier 1 — published, but not a headline venue. */
+  .chip.venue.pub {
+    color: var(--text);
+    border-color: var(--border);
+  }
+
+  /* Tier 0 — preprint or unknown. */
+  .chip.venue.pre {
+    color: var(--text-faint);
+    background: none;
+    border-style: dashed;
+  }
+
+  .chip.filter {
+    height: 28px;
+    padding: 0 10px;
+    gap: 5px;
+    cursor: pointer;
+    color: var(--text-muted);
+  }
+
+  .chip.filter.on {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .note {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
   }
 
   .chip.src {

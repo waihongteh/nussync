@@ -33,6 +33,16 @@ type Paper struct {
 	PDFURL        string
 	PublishedAt   string // RFC3339 or YYYY-MM-DD
 	Source        string // "arxiv" | "s2"
+
+	// Venue ranking (venue.go). Derived, never stored: AnnotateVenue fills
+	// them from Venue/Comment/DOI every time a paper crosses a boundary.
+	VenueTier  int    // 2 top venue, 1 published, 0 preprint/unknown
+	VenueShort string // badge label, e.g. "NeurIPS 2025" or "preprint"
+	Published  bool   // VenueTier >= 1
+
+	// Comment is the arXiv <arxiv:comment> ("Accepted at ACL 2025"). It is
+	// evidence for venue detection only and is not part of the app contract.
+	Comment string
 }
 
 // ArxivPaperID builds the canonical id for an arXiv paper.
@@ -121,7 +131,9 @@ func enrich(dst *Paper, src Paper) {
 	if dst.TLDR == "" {
 		dst.TLDR = src.TLDR
 	}
-	if dst.Venue == "" {
+	// An arXiv row's Venue is "arXiv cs.LG" when the paper carries no
+	// journal_ref, which must not hide a real venue coming from S2.
+	if IsPreprintVenue(dst.Venue) && !IsPreprintVenue(src.Venue) {
 		dst.Venue = src.Venue
 	}
 	if dst.CitationCount == 0 {

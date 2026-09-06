@@ -21,6 +21,7 @@ import type {
   LibraryPaper,
   Overview,
   Paper,
+  PaperSearchResult,
   PaperDigest,
   PaperSummary,
   Question,
@@ -586,6 +587,13 @@ let settings: Settings = {
   PaperCategories: ['cs.CL', 'cs.LG', 'cs.AI'],
   PaperDigestHour: 9,
   NotifyPapers: true,
+  PaperTopVenues: [
+    'NeurIPS', 'ICML', 'ICLR', 'ACL', 'EMNLP', 'NAACL', 'EACL', 'COLING',
+    'AAAI', 'IJCAI', 'COLM', 'TACL', 'JMLR', 'TMLR', 'CVPR', 'ICCV',
+    'ECCV', 'KDD', 'WWW', 'SIGIR', 'USENIX Security', 'IEEE S&P', 'CCS',
+    'NDSS', 'ICSE', 'FSE',
+  ],
+  PaperPreferPublished: true,
   PaperTelegramToken: '',
   PaperTelegramChatID: '',
 };
@@ -1357,6 +1365,42 @@ interface PaperSeed {
   arxiv?: string;
 }
 
+/** The canonical venues the Go side ranks as tier 2 (internal/papers/venue.go). */
+const TOP_VENUES = [
+  'NeurIPS', 'ICML', 'ICLR', 'ACL', 'EMNLP', 'NAACL', 'EACL', 'COLING',
+  'AAAI', 'IJCAI', 'COLM', 'TACL', 'JMLR', 'TMLR', 'CVPR', 'ICCV',
+  'ECCV', 'KDD', 'WWW', 'SIGIR', 'USENIX Security', 'IEEE S&P', 'CCS',
+  'NDSS', 'ICSE', 'FSE',
+];
+
+/** Mirror of papers.DetectVenue, simplified to what the seeds need. */
+function detectVenue(venue: string, year: number): Pick<Paper, 'VenueTier' | 'VenueShort' | 'Published'> {
+  const v = venue.trim();
+  if (!v || /^(arxiv|corr|preprint)/i.test(v)) return { VenueTier: 0, VenueShort: 'preprint', Published: false };
+  const canon = TOP_VENUES.find((t) => new RegExp(`\b${t.replace('&', '&')}\b`, 'i').test(v));
+  const workshop = /workshop/i.test(v);
+  if (!canon) return { VenueTier: 1, VenueShort: v.slice(0, 34), Published: true };
+  const y = v.match(/(19|20)\d{2}/)?.[0] ?? String(year);
+  return {
+    VenueTier: workshop ? 1 : 2,
+    VenueShort: `${canon} ${y}${workshop ? ' Workshop' : ''}`,
+    Published: true,
+  };
+}
+
+/** Mirror of papers.Score, so mock ordering matches the real backend's. */
+function paperScore(p: Paper, preferPublished = true): number {
+  let s = 0;
+  if (preferPublished) s += p.VenueTier === 2 ? 100 : p.VenueTier === 1 ? 40 : 0;
+  if (p.CitationCount > 0) s += Math.log(p.CitationCount + 1) * 8;
+  const t = Date.parse(p.PublishedAt);
+  if (!Number.isNaN(t)) {
+    const months = (Date.now() - t) / (1000 * 60 * 60 * 24 * 30.44);
+    if (months >= 0 && months < 12) s += 15 * (1 - months / 12);
+  }
+  return s;
+}
+
 function mkPaper(p: PaperSeed): Paper {
   const arxiv = p.arxiv ?? (p.id.startsWith('arxiv:') ? p.id.slice(6) : '');
   const s2 = p.id.startsWith('s2:') ? p.id.slice(3) : '';
@@ -1376,6 +1420,7 @@ function mkPaper(p: PaperSeed): Paper {
     PDFURL: arxiv ? `https://arxiv.org/pdf/${arxiv}` : '',
     PublishedAt: `${p.year}-${String(((p.cites % 12) + 1)).padStart(2, '0')}-14T00:00:00Z`,
     Source: arxiv ? 'arxiv' : 's2',
+    ...detectVenue(p.venue, p.year),
   };
 }
 
@@ -2032,6 +2077,50 @@ const chatJobSessions = new Map<string, string>();
 
 // ---------------------------------------------------------------- the mock
 
+/** Shared by SearchPapers and SearchPapersFiltered. */
+async function searchPapersMock(
+  query: string,
+  source: string,
+  limit: number,
+  publishedOnly: boolean,
+): Promise<PaperSearchResult> {
+  await delay(null, 420);
+  const q = query.trim().toLowerCase();
+  let list = ALL_PAPERS.filter((p) => source === 'all' || !source || p.Source === source);
+  if (q) {
+    const scored = list
+      .map((p) => {
+        const hay = `${p.Title} ${p.Abstract} ${p.TLDR} ${(p.Authors ?? []).join(' ')}`.toLowerCase();
+        let score = 0;
+        for (const term of q.split(/\s+/)) {
+          if (!term) continue;
+          if (p.Title.toLowerCase().includes(term)) score += 6;
+          if (hay.includes(term)) score += 2;
+        }
+        return { p, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || b.p.CitationCount - a.p.CitationCount);
+    list = scored.map((x) => x.p);
+    // An empty result is a bad demo; fall back to the seeded eight.
+    if (!list.length) list = ALL_PAPERS.filter((p) => source === 'all' || !source || p.Source === source);
+  } else {
+    list = [...list].sort((a, b) => b.CitationCount - a.CitationCount);
+  }
+  if (publishedOnly) list = list.filter((p) => p.VenueTier >= 1);
+  // The real backend re-orders by Score with the source rank as a tie-break.
+  const prefer = settings.PaperPreferPublished !== false;
+  const rank = new Map(list.map((p, i) => [p.ID, paperScore(p, prefer) + (5 * (list.length - i)) / list.length]));
+  list = [...list].sort((a, b) => (rank.get(b.ID) ?? 0) - (rank.get(a.ID) ?? 0));
+  const capped = list.slice(0, limit > 0 ? limit : 20);
+  return {
+    Papers: capped.map((p) => ({ ...p, Authors: [...(p.Authors ?? [])] })),
+    Total: list.length,
+    Note: '',
+  };
+}
+
+
 export const mockAPI: AppAPI = {
   GetCourses: () => delay(COURSES.map((c) => ({ ...c }))),
 
@@ -2423,33 +2512,11 @@ export const mockAPI: AppAPI = {
   },
 // --------------------------------------------------------------- papers
 
-  SearchPapers: async (query, source, limit) => {
-    await delay(null, 420);
-    const q = query.trim().toLowerCase();
-    let list = ALL_PAPERS.filter((p) => source === 'all' || !source || p.Source === source);
-    if (q) {
-      const scored = list
-        .map((p) => {
-          const hay = `${p.Title} ${p.Abstract} ${p.TLDR} ${(p.Authors ?? []).join(' ')}`.toLowerCase();
-          let score = 0;
-          for (const term of q.split(/\s+/)) {
-            if (!term) continue;
-            if (p.Title.toLowerCase().includes(term)) score += 6;
-            if (hay.includes(term)) score += 2;
-          }
-          return { p, score };
-        })
-        .filter((x) => x.score > 0)
-        .sort((a, b) => b.score - a.score || b.p.CitationCount - a.p.CitationCount);
-      list = scored.map((x) => x.p);
-      // An empty result is a bad demo; fall back to the seeded eight.
-      if (!list.length) list = ALL_PAPERS.filter((p) => source === 'all' || !source || p.Source === source);
-    } else {
-      list = [...list].sort((a, b) => b.CitationCount - a.CitationCount);
-    }
-    const capped = list.slice(0, limit > 0 ? limit : 20);
-    return { Papers: capped.map((p) => ({ ...p, Authors: [...(p.Authors ?? [])] })), Total: list.length };
-  },
+
+  SearchPapers: async (query, source, limit) => searchPapersMock(query, source, limit, false),
+
+  SearchPapersFiltered: async (query, source, limit, publishedOnly) =>
+    searchPapersMock(query, source, limit, publishedOnly),
 
   GetPaper: async (id) => {
     await delay(null, 160);

@@ -67,6 +67,9 @@ type Settings struct {
     PaperCategories []string /*arXiv categories, default ["cs.CL","cs.LG","cs.AI"]*/
     PaperDigestHour int      /*0-23 local time, default 9*/
     NotifyPapers bool        /*default true*/
+    PaperTopVenues []string  /*tier-2 venues for paper ranking; default the
+      26 names in docs/CONTRACT_PAPERS.md, empty falls back to that list*/
+    PaperPreferPublished bool /*rank published venues above preprints, default true*/
 }
 type SyncStatus struct {
     Running bool; Phase string /*"idle"|"listing"|"downloading"|"indexing"|"error"*/

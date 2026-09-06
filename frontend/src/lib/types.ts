@@ -136,6 +136,10 @@ export interface Settings {
   PaperDigestHour: number;
   /** Send the daily paper digest at all. */
   NotifyPapers: boolean;
+  /** Venues that count as tier 2 when ranking search, digest and recs. */
+  PaperTopVenues: string[];
+  /** Weight published venues above preprints (default true). */
+  PaperPreferPublished: boolean;
   /** Token of the SEPARATE Telegram bot dedicated to papers. */
   PaperTelegramToken: string;
   /** Chat ID paired with the paper bot. */
@@ -305,6 +309,12 @@ export interface Paper {
   PublishedAt: string;
   /** "arxiv" | "s2" */
   Source: string;
+  /** 2 = top venue, 1 = any published venue, 0 = preprint/unknown */
+  VenueTier: number;
+  /** badge label, e.g. "NeurIPS 2025", "published" or "preprint" */
+  VenueShort: string;
+  /** VenueTier >= 1 */
+  Published: boolean;
 }
 
 export interface LibraryPaper extends Paper {
@@ -329,6 +339,8 @@ export interface LibraryPaper extends Paper {
 export interface PaperSearchResult {
   Papers: Paper[] | null;
   Total: number;
+  /** set when the result is degraded, e.g. Semantic Scholar was rate limited */
+  Note: string;
 }
 
 /** Go embeds Paper, so its fields are flattened into this object. */
@@ -475,6 +487,12 @@ export interface AppAPI {
 
   // ------------------------------------------------------------- papers
   SearchPapers(query: string, source: string, limit: number): Promise<PaperSearchResult>;
+  SearchPapersFiltered(
+    query: string,
+    source: string,
+    limit: number,
+    publishedOnly: boolean,
+  ): Promise<PaperSearchResult>;
   GetPaper(id: string): Promise<Paper>;
   AddPaperToLibrary(p: Paper): Promise<LibraryPaper>;
   RemovePaperFromLibrary(id: string): Promise<void>;

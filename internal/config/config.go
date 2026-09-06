@@ -41,6 +41,10 @@ type Settings struct {
 	PaperCategories     []string
 	PaperDigestHour     int
 	NotifyPapers        bool
+	// Venue ranking: PaperTopVenues are the tier-2 venues, editable by the
+	// user; PaperPreferPublished turns the tier weight in papers.Score on.
+	PaperTopVenues       []string
+	PaperPreferPublished bool
 }
 
 // Defaults returns the baseline settings used on first run.
@@ -62,9 +66,24 @@ func Defaults() Settings {
 			"machine unlearning", "LLM unlearning", "knowledge editing",
 			"model editing", "knowledge unlearning", "memorization",
 		},
-		PaperCategories: []string{"cs.CL", "cs.LG", "cs.AI"},
-		PaperDigestHour: 9,
-		NotifyPapers:    true,
+		PaperCategories:      []string{"cs.CL", "cs.LG", "cs.AI"},
+		PaperDigestHour:      9,
+		NotifyPapers:         true,
+		PaperTopVenues:       DefaultTopVenues(),
+		PaperPreferPublished: true,
+	}
+}
+
+// DefaultTopVenues is the shipped tier-2 venue list. It must stay identical to
+// papers.DefaultTopVenues() — config cannot import papers (papers -> sync ->
+// config is an import cycle), so TestTopVenueDefaultsMatch in package main
+// guards the copy.
+func DefaultTopVenues() []string {
+	return []string{
+		"NeurIPS", "ICML", "ICLR", "ACL", "EMNLP", "NAACL", "EACL", "COLING",
+		"AAAI", "IJCAI", "COLM", "TACL", "JMLR", "TMLR", "CVPR", "ICCV",
+		"ECCV", "KDD", "WWW", "SIGIR", "USENIX Security", "IEEE S&P", "CCS",
+		"NDSS", "ICSE", "FSE",
 	}
 }
 
@@ -187,6 +206,11 @@ func normalize(s *Settings) {
 	}
 	if s.PaperDigestHour < 0 || s.PaperDigestHour > 23 {
 		s.PaperDigestHour = d.PaperDigestHour
+	}
+	// An empty top-venue list would silently disable tier 2, so it falls back
+	// to the shipped list; clearing the ranking is done with the toggle.
+	if len(s.PaperTopVenues) == 0 {
+		s.PaperTopVenues = d.PaperTopVenues
 	}
 	for i, e := range s.SkipExts {
 		e = strings.ToLower(strings.TrimSpace(e))

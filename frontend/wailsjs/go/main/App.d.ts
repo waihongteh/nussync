@@ -90,6 +90,8 @@ export function HideWindow():Promise<void>;
 
 export function Init(arg1:boolean):Promise<void>;
 
+export function MarkAllAnnouncementsRead():Promise<void>;
+
 export function MarkAnnouncementRead(arg1:number):Promise<void>;
 
 export function MarkFeedSeen():Promise<void>;
@@ -115,6 +117,8 @@ export function SaveSettings(arg1:main.Settings):Promise<void>;
 export function Search(arg1:string,arg2:number):Promise<Array<main.SearchHit>>;
 
 export function SearchPapers(arg1:string,arg2:string,arg3:number):Promise<main.PaperSearchResult>;
+
+export function SearchPapersFiltered(arg1:string,arg2:string,arg3:number,arg4:boolean):Promise<main.PaperSearchResult>;
 
 export function SendChat(arg1:string,arg2:string):Promise<string>;
 

@@ -651,6 +651,64 @@ gone — `auth status` reports `loggedIn:true`, `claude.ai`, max):
   Files. `npm run check` 0 errors, `npm run build` clean. Not yet run against
   the real Go backend.
 
+## Papers: venue-priority ranking (2026-09-06)
+
+Goal: peer-reviewed work outranks preprints in search, the digest and
+recommendations.
+
+- **`internal/papers/venue.go`** is the whole feature: `DetectVenue`,
+  `AnnotateVenue(s)`, `Score`, `SortByScore`, `FilterPublished`. Tiers: 2 = a
+  venue on `PaperTopVenues`, 1 = any other detected venue (and every workshop
+  paper, including workshops at top venues), 0 = preprint/unknown.
+- **`VenueTier`/`VenueShort`/`Published` are DERIVED, never stored.** No
+  `papers_library` migration: `toPaper`/`toLibraryPaper` re-annotate on every
+  read, so changing the settings re-tiers the whole library instantly. The one
+  thing that must persist is the venue *name*, so when the venue was found only
+  in the arXiv comment, `AnnotateVenue` writes the short name back into `Venue`
+  ("arXiv cs.LG" -> "ACL 2025") before the row is saved. Do not "optimise" this
+  into stored columns without also handling settings changes.
+- `papers.Paper` gained an unexported-in-spirit `Comment` field (the arXiv
+  `<arxiv:comment>`); it is evidence for detection only and is deliberately NOT
+  on the contract `main.Paper`.
+- Detection evidence, strongest first: S2 `venue` / `publicationVenue.name` /
+  `journal.name` (the last two were added to `S2Fields`, search + by-id only —
+  the edge/recommendation endpoints reject unknown fields with a 400, which is
+  why `S2EdgeFields` was left alone), arXiv `journal_ref`, arXiv comment
+  ("Accepted at/to", "To appear in", "Published in", "camera-ready"), then a
+  non-arXiv DOI as weak evidence (tier 1, label "published"). arXiv's own
+  10.48550 DOI proves nothing and is ignored.
+- Short aliases that occur in prose (`acl`, `ccs`, `www`, `fse`) are marked
+  *risky*: they only count when the candidate string is short or a year sits
+  within 12 characters. URLs are stripped from comments first, which is what
+  stops "https://www.github.com/…" from reading as WWW.
+- `Score` = tier (2 -> +100, 1 -> +40, only when `PaperPreferPublished`) +
+  `log(cites+1)*8` + recency (<= 12 months, +15 decaying). `SortByScore` adds up
+  to +5 for the source's own position so query relevance survives as a
+  tie-break. Deliberately not a veto: a 90k-citation preprint still beats a
+  12-citation journal paper (test asserts it).
+- **The digest keeps at least 2 preprints** (`MinFreshPreprints`). "New on
+  arXiv today" is almost entirely preprints, so pure score ordering emptied the
+  fresh half — `pickDigestFresh` swaps the weakest published picks back out.
+- `SearchPapers` is now a wrapper over **`SearchPapersFiltered(query, source,
+  limit, publishedOnly)`** so the old binding signature is untouched.
+  `PaperSearchResult` gained `Note`, set when S2 429s (then venues can only come
+  from arXiv comments) and shown above the results.
+- `config.DefaultTopVenues()` duplicates `papers.DefaultTopVenues()`: config
+  cannot import papers (papers -> sync -> config is an import cycle).
+  `TestTopVenueDefaultsMatch` in package main guards the copy.
+- Frontend: gold badge for tier 2, plain for tier 1, dashed/muted "preprint" for
+  tier 0, on result cards, library cards, the recs/digest rail and the
+  citations drawer. Sort selects — results Best/Citations/Year, library those
+  plus Added; "Best" must NOT re-sort results (the backend order is the
+  ranking). "Published only" chip calls `searchPapersFiltered`. Settings ▸
+  Papers has the top-venue chip editor and the "Prefer published" toggle.
+
+### Verified run (2026-09-06)
+`go run . --papers-test "machine unlearning"` with S2 429ing (the usual case):
+the Note surfaced, and TMLR/ICML/CVPR papers detected purely from arXiv
+comments took the top slots over same-day preprints; 13 of 20 results survived
+"Published only".
+
 ## Repo
 - GitHub: https://github.com/waihongteh/nussync (origin, branch main). Windows-only target; Mac/Linux port abandoned 2026-09-05 by user choice.
 
@@ -760,3 +818,50 @@ the WebView2 line, and survives two Ctrl+Shift+N presses.
   row, Alt+↑/↓ on a focused row, and a Settings → Sync "Hide non-academic
   courses" quick action. Hidden is presentation only: those courses still sync
   and still appear in Files/Deadlines/Settings.
+
+## Paper bot: search + library commands (2026-09-06)
+Code: `internal/notify/papercmds.go` (+ `papercmds_test.go`), the extended
+handler in `internal/notify/paperbot.go`, `app_paperbot.go`, `cli_paperbot.go`.
+
+- Commands added to the **paper** bot only (deliberately not the course bot):
+  `/search <query>` (top 5, all sources), `/download <n>`, `/library
+  [toread|reading|done]` (max 15), `/done <n>`, `/start-reading <n>` (alias
+  `/read <n>`). `/save <n>` now indexes into whichever numbered list the chat
+  saw last — search results *or* the digest.
+- **Numbering is remembered per chat**, in memory and mirrored into the kv
+  table (`paperbot_list_<chat>` for search/digest, `paperbot_lib_<chat>` for
+  the library listing), so it survives a restart. Two keys, not one: a later
+  `/search` must not silently repoint `/done 2` at a search hit. Verified
+  across separate processes.
+- `PaperBot.Handle(ctx, chatID, cmd, args)` is the single command entry point
+  and **returns** the reply text; the poll loop wraps it in `handle`, which
+  sends the "Searching…"-style progress line first. That split is what lets the
+  CLI print a reply instead of sending one, and what makes the handler
+  table-testable with a fake `PaperExt`.
+- **`notify` stays a transport package.** The app implements the new
+  `notify.PaperExt` interface (search/digest/save/download/library/status) and
+  hands the bot flat `notify.PaperItem` values, so notify never imports
+  `internal/papers`. Formatting for the new commands therefore lives in
+  `notify` (`SearchResultsMessage`, `LibraryMessage`, …), not in
+  `papers/digest.go`.
+- Wiring lives in **`app_paperbot.go`**, not `app_papers.go`: `App.startup`
+  calls `installPaperBotExt()` right after `papersInit()`, which does
+  `paperBot().SetExt(paperExt{a})`. `SetExt` is mutex-guarded because the poll
+  loop is already running. With no ext installed the bot keeps exactly its old
+  digest-only behaviour (and its old help), which is what the tests pin.
+- `notify.PaperHelpMessage` (the extended help) shadows
+  `papers.PaperHelpMessage` (digest-only) whenever an ext is set — `help()`
+  chooses, rather than the app overwriting the `Help` field after `Start`.
+- New CLI: `nussync --papers-bot-test "/search LLM unlearning"` runs the real
+  handler headlessly and prints the reply plus its byte count. In Git Bash you
+  must prefix `MSYS2_ARG_CONV_EXCL='*' MSYS_NO_PATHCONV=1`, otherwise MSYS
+  rewrites `/search …` into `C:/Program Files/Git/search …`.
+
+### Verified run (2026-09-06)
+`--papers-bot-test "/search LLM unlearning"` on the paired paper bot: 5 hits
+with the new venue ranking visible (COLM 2025, ICML 2025 Workshop), first two
+authors + "et al.", `year · venue|preprint · N citations`, links, 1077 bytes /
+1 message. `/library` listed the 3 saved papers with status and page/pages;
+`/help` shows all ten commands; `/download 99` in a *fresh process* answered
+"the last list had 5 entries", proving the kv-backed numbering persists.
+`go build/vet/test ./...` and `gofmt -l .` clean.

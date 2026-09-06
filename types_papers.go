@@ -20,6 +20,12 @@ type Paper struct {
 	PDFURL        string
 	PublishedAt   string
 	Source        string // "arxiv" | "s2"
+
+	// Venue ranking (internal/papers/venue.go). Derived on every read, never
+	// stored: only Venue itself survives in papers_library.
+	VenueTier  int    // 2 top venue, 1 published, 0 preprint/unknown
+	VenueShort string // badge label, e.g. "NeurIPS 2025" or "preprint"
+	Published  bool   // VenueTier >= 1
 }
 
 // LibraryPaper is a saved paper plus its reading state. Paper is embedded, so
@@ -44,6 +50,9 @@ type LibraryPaper struct {
 type PaperSearchResult struct {
 	Papers []Paper
 	Total  int
+	// Note explains a degraded result, e.g. Semantic Scholar being rate
+	// limited so venues could only come from arXiv comments. "" when fine.
+	Note string
 }
 
 // CitationLink is a citing/cited paper with its library state.

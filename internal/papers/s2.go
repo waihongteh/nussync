@@ -18,7 +18,7 @@ import (
 const S2Endpoint = "https://api.semanticscholar.org/graph/v1"
 
 // S2Fields is the field list requested for every paper object.
-const S2Fields = "title,abstract,year,venue,authors,citationCount,openAccessPdf,tldr,externalIds,url,publicationDate"
+const S2Fields = "title,abstract,year,venue,publicationVenue,journal,authors,citationCount,openAccessPdf,tldr,externalIds,url,publicationDate"
 
 // S2EdgeFields is S2Fields minus "tldr". The citations/references endpoints and
 // the recommendations API reject it outright with
@@ -272,6 +272,15 @@ type s2Paper struct {
 	} `json:"externalIds"`
 	URL             string `json:"url"`
 	PublicationDate string `json:"publicationDate"`
+	// publicationVenue/journal are only served by /paper/search and
+	// /paper/{id}; the edge endpoints return them as null.
+	PublicationVenue *struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	} `json:"publicationVenue"`
+	Journal *struct {
+		Name string `json:"name"`
+	} `json:"journal"`
 }
 
 func (r s2Paper) toPaper() Paper {
@@ -299,6 +308,18 @@ func (r s2Paper) toPaper() Paper {
 	}
 	if r.OpenAccessPDF != nil {
 		p.PDFURL = r.OpenAccessPDF.URL
+	}
+	// Venue detection wants the richest name available: `venue` is often "",
+	// while publicationVenue.name / journal.name carry the real thing.
+	if IsPreprintVenue(p.Venue) && r.PublicationVenue != nil {
+		if n := collapseSpace(r.PublicationVenue.Name); !IsPreprintVenue(n) {
+			p.Venue = n
+		}
+	}
+	if IsPreprintVenue(p.Venue) && r.Journal != nil {
+		if n := collapseSpace(r.Journal.Name); !IsPreprintVenue(n) {
+			p.Venue = n
+		}
 	}
 	if p.PDFURL == "" && p.ArxivID != "" {
 		p.PDFURL = "https://arxiv.org/pdf/" + p.ArxivID
