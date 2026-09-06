@@ -387,19 +387,17 @@ func (s *Store) UpsertGrade(g Grade) (bool, error) {
 	if err != nil && err != sql.ErrNoRows {
 		return false, err
 	}
-	notified := b2i(g.Notified)
-	if changed {
-		notified = 0
-	}
+	// A changed grade must be re-announced; an unchanged one keeps its flag so
+	// re-syncs never re-send old grades.
 	_, err = s.db.Exec(`
 		INSERT INTO grades(assignment_id, course_id, course_code, title, score, possible, graded_at, url, notified)
 		VALUES(?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(assignment_id) DO UPDATE SET
 			course_code=excluded.course_code, title=excluded.title, score=excluded.score,
 			possible=excluded.possible, graded_at=excluded.graded_at, url=excluded.url,
-			notified=excluded.notified`,
+			notified=CASE WHEN excluded.graded_at<>grades.graded_at OR excluded.score<>grades.score THEN 0 ELSE grades.notified END`,
 		g.AssignmentID, g.CourseID, g.CourseCode, g.Title, g.Score, g.Possible,
-		g.GradedAt, g.URL, notified)
+		g.GradedAt, g.URL, b2i(g.Notified))
 	return changed, err
 }
 
@@ -513,4 +511,16 @@ func (s *Store) RewriteCoursePaths(courseID int, oldPrefix, newPrefix string) (i
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// MarkAllGradesNotified flags every stored grade as already announced.
+func (s *Store) MarkAllGradesNotified() error {
+	_, err := s.db.Exec(`UPDATE grades SET notified=1 WHERE notified=0`)
+	return err
+}
+
+// MarkAllAnnouncementsNotified flags every stored announcement as already announced.
+func (s *Store) MarkAllAnnouncementsNotified() error {
+	_, err := s.db.Exec(`UPDATE announcements SET notified=1 WHERE notified=0`)
+	return err
 }

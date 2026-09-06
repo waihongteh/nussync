@@ -110,6 +110,13 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 		return
 	}
 	s.checkReminders(ctx, cfg)
+	// First run on this machine: swallow the backlog instead of blasting
+	// every historical grade and announcement to Telegram.
+	if v, _ := s.Store.GetKV(kvNotifyBootstrapped); v == "" {
+		_ = s.Store.MarkAllGradesNotified()
+		_ = s.Store.MarkAllAnnouncementsNotified()
+		_ = s.Store.SetKV(kvNotifyBootstrapped, s.Now().Format(time.RFC3339))
+	}
 	if cfg.NotifyAnnouncements {
 		s.checkAnnouncements(ctx, cfg)
 	}
@@ -119,6 +126,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 }
 
 const kvFirstRun = "notify_bootstrapped"
+const kvNotifyBootstrapped = "notify_backlog_v2"
 
 // checkReminders walks unsubmitted future deadlines and fires due ladder rungs.
 func (s *Scheduler) checkReminders(ctx context.Context, cfg config.Settings) {
