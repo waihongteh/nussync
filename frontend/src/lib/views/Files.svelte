@@ -3,6 +3,7 @@
   import ContextMenu from '../components/ContextMenu.svelte';
   import FolderTree from '../components/FolderTree.svelte';
   import Icon from '../components/Icon.svelte';
+  import Viewer from '../components/Viewer.svelte';
   import { courses, courseByID, flatFiles, openChat, openFileNode, selectedCourseID, setContext, toast } from '../stores';
   import type { FileNode, MenuItem, SearchHit } from '../types';
   import { debounce, fileKind, fmtBytes, lsGet, lsSet, relTime, snippetHTML } from '../util';
@@ -21,6 +22,8 @@
 
   const EXPANDED_KEY = 'nussync.files.expanded';
   const SELECTED_KEY = 'nussync.files.selectedFolder';
+  const VIEWER_W_KEY = 'nussync.viewer.w';
+  const VIEWER_MIN = 320;
 
   let roots = $state<FileNode[]>([]);
   let loading = $state(true);
@@ -32,6 +35,10 @@
   let selectedFile = $state<string>('');
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   let tick = $state(Date.now());
+  let viewerOpen = $state(false);
+  let viewerW = $state(Math.max(VIEWER_MIN, lsGet<number>(VIEWER_W_KEY, 520)));
+  let dragging = $state(false);
+  let panesEl = $state<HTMLDivElement | null>(null);
 
   $effect(() => {
     const h = setInterval(() => (tick = Date.now()), 60_000);
@@ -169,10 +176,107 @@
     void openFileNode(f);
   }
 
-  /** Selecting a file also makes it the chat panel's context. */
-  function select(f: FileNode) {
+  /**
+   * Single click: select, make this the chat panel's context, and preview.
+   * Double click still hands the file to the OS (see `activate`).
+   */
+  function select(f: FileNode, preview = true) {
     selectedFile = keyOf(f);
     setContext(f.ID, '', f.Name);
+    if (preview) viewerOpen = true;
+  }
+
+  /** The node the viewer pane is showing, resolved from the selection key. */
+  const previewFile = $derived(
+    selectedFile
+      ? visibleFiles.find((f) => keyOf(f) === selectedFile) ?? paneFiles.find((f) => keyOf(f) === selectedFile) ?? null
+      : null,
+  );
+
+  function closeViewer() {
+    viewerOpen = false;
+  }
+
+  function toggleViewer() {
+    if (viewerOpen) {
+      viewerOpen = false;
+      return;
+    }
+    if (!previewFile && visibleFiles.length > 0) select(visibleFiles[0], false);
+    viewerOpen = true;
+  }
+
+  /** Move the selection up/down the list while the viewer is open. */
+  function step(delta: number) {
+    const list = visibleFiles;
+    if (list.length === 0) return;
+    const i = list.findIndex((f) => keyOf(f) === selectedFile);
+    const next = list[Math.min(list.length - 1, Math.max(0, (i < 0 ? 0 : i) + delta))];
+    if (next) select(next);
+  }
+
+  /** True while the user is typing somewhere a bare arrow key belongs to them. */
+  function inField(t: EventTarget | null): boolean {
+    const el = t as HTMLElement | null;
+    if (!el) return false;
+    return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
+  }
+
+  function onKey(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+      e.preventDefault();
+      toggleViewer();
+      return;
+    }
+    if (e.key === 'Escape' && viewerOpen && !menu) {
+      // Only when the search box is not the one asking to be cleared.
+      if (!(inField(e.target) && query)) {
+        e.preventDefault();
+        closeViewer();
+      }
+      return;
+    }
+    if (!viewerOpen || inField(e.target)) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      step(1);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      step(-1);
+    }
+  }
+
+  // ------------------------------------------------------- viewer resizing
+
+  function startDrag(e: PointerEvent) {
+    e.preventDefault();
+    dragging = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function onDrag(e: PointerEvent) {
+    if (!dragging || !panesEl) return;
+    const rect = panesEl.getBoundingClientRect();
+    // Leave room for the tree + list panes on the left.
+    const max = Math.max(VIEWER_MIN, rect.width - 520);
+    viewerW = Math.min(max, Math.max(VIEWER_MIN, rect.right - e.clientX));
+  }
+
+  function endDrag(e: PointerEvent) {
+    if (!dragging) return;
+    dragging = false;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    lsSet(VIEWER_W_KEY, Math.round(viewerW));
+  }
+
+  /** Keyboard-resizable handle, for anyone not using a pointer. */
+  function handleKey(e: KeyboardEvent) {
+    const d = e.key === 'ArrowLeft' ? 24 : e.key === 'ArrowRight' ? -24 : 0;
+    if (!d) return;
+    e.preventDefault();
+    e.stopPropagation();
+    viewerW = Math.max(VIEWER_MIN, viewerW + d);
+    lsSet(VIEWER_W_KEY, Math.round(viewerW));
   }
 
   async function copyPath(f: FileNode) {
@@ -244,9 +348,19 @@
         <option value={c.ID}>{c.Code}</option>
       {/each}
     </select>
+    <button
+      class="btn sm"
+      class:on={viewerOpen}
+      onclick={toggleViewer}
+      title="Toggle the preview pane (Ctrl+P)"
+      aria-pressed={viewerOpen}
+    >
+      <Icon name={viewerOpen ? 'eyeOff' : 'eye'} size={13} />
+      Preview
+    </button>
   </div>
 
-  <div class="panes">
+  <div class="panes" bind:this={panesEl}>
     <div class="tree-pane">
       <button
         class="all-row"
@@ -341,8 +455,27 @@
         {/if}
       </div>
     </div>
+
+    {#if viewerOpen}
+      <button
+        type="button"
+        class="vhandle"
+        class:dragging
+        aria-label="Resize the preview pane (arrow keys)"
+        onpointerdown={startDrag}
+        onpointermove={onDrag}
+        onpointerup={endDrag}
+        onpointercancel={endDrag}
+        onkeydown={handleKey}
+      ></button>
+      <div class="viewer-pane" style="width:{viewerW}px">
+        <Viewer file={previewFile} onClose={closeViewer} />
+      </div>
+    {/if}
   </div>
 </div>
+
+<svelte:window onkeydown={onKey} />
 
 {#if menu}
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
@@ -418,6 +551,44 @@
     flex: 1;
     min-height: 0;
     display: flex;
+  }
+
+  .viewer-pane {
+    flex: none;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+  }
+
+  .viewer-pane :global(.viewer) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* 5px grab strip, widened by a ::before so it is easy to hit. */
+  .vhandle {
+    flex: none;
+    width: 5px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    cursor: col-resize;
+    background: var(--border);
+    position: relative;
+    touch-action: none;
+  }
+
+  .vhandle::before {
+    content: '';
+    position: absolute;
+    inset: 0 -3px;
+  }
+
+  .vhandle:hover,
+  .vhandle:focus-visible,
+  .vhandle.dragging {
+    background: var(--accent);
+    outline: none;
   }
 
   .tree-pane {

@@ -57,6 +57,9 @@ func main() {
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
+			// Intercepts /local/... for the in-app file viewer and passes
+			// everything else through; see assets.go.
+			Middleware: LocalAssetMiddleware(app),
 		},
 		BackgroundColour:  &options.RGBA{R: 15, G: 17, B: 21, A: 1},
 		HideWindowOnClose: true,

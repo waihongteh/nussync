@@ -419,6 +419,8 @@ export interface AppAPI {
   GetTree(courseID: number): Promise<FileNode[]>;
   GetRecentFiles(limit: number): Promise<FileNode[]>;
   Search(query: string, courseID: number): Promise<SearchHit[]>;
+  GetFileInfo(fileID: number): Promise<FileNode>;
+  GetFileText(fileID: number, maxChars: number): Promise<string>;
   OpenFile(path: string): Promise<void>;
   RevealFile(path: string): Promise<void>;
   OpenURL(url: string): Promise<void>;

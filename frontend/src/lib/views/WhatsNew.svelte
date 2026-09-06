@@ -7,8 +7,9 @@
   import { api, errMsg } from '../api';
   import ContextMenu from '../components/ContextMenu.svelte';
   import Icon from '../components/Icon.svelte';
+  import Viewer from '../components/Viewer.svelte';
   import { courseByID, toast, unseenCount } from '../stores';
-  import type { FeedItem, MenuItem } from '../types';
+  import type { FeedItem, FileNode, MenuItem } from '../types';
   import { fileKind, fmtBytes, relTime } from '../util';
   import { on } from '../api';
 
@@ -137,12 +138,35 @@
     }
   }
 
+  /** File shown in the preview overlay, or null. */
+  let preview = $state<FileNode | null>(null);
+
+  /** FeedItem carries everything FileNode needs bar a couple of unused fields. */
+  function previewIt(it: FeedItem) {
+    preview = {
+      ID: it.ID,
+      CourseID: it.CourseID,
+      Name: it.Name,
+      Path: it.Path,
+      RelPath: it.RelPath,
+      IsDir: false,
+      Size: it.Size,
+      ModifiedAt: it.ChangedAt,
+      Source: 'files',
+      Module: it.Module,
+      Synced: true,
+      IsNew: it.Kind === 'new',
+      Children: null,
+    };
+  }
+
   function openMenu(e: MouseEvent, it: FeedItem) {
     e.preventDefault();
     menu = {
       x: e.clientX,
       y: e.clientY,
       items: [
+        { label: 'Preview', icon: 'eye', run: () => previewIt(it) },
         { label: 'Open', icon: 'external', run: () => void open(it) },
         {
           label: 'Reveal in Explorer',
@@ -235,11 +259,51 @@
   </div>
 </div>
 
+{#if preview}
+  <div
+    class="pv-backdrop"
+    role="presentation"
+    onclick={(e) => { if (e.target === e.currentTarget) preview = null; }}
+  >
+    <div class="pv-shell card" role="dialog" aria-modal="true" aria-label="File preview">
+      <Viewer file={preview} onClose={() => (preview = null)} />
+    </div>
+  </div>
+{/if}
+
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && preview) preview = null; }} />
+
 {#if menu}
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
 {/if}
 
 <style>
+  /* Preview overlay (right-click a row -> Preview). */
+  .pv-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 34px;
+    background: var(--bg-overlay);
+  }
+
+  .pv-shell {
+    width: min(1000px, 100%);
+    height: min(80vh, 100%);
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    box-shadow: var(--shadow-pop);
+  }
+
+  .pv-shell :global(.viewer) {
+    flex: 1;
+    min-width: 0;
+  }
+
   .head {
     display: flex;
     align-items: flex-start;

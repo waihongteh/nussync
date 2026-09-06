@@ -12,6 +12,8 @@ func TestContractSignatures(t *testing.T) {
 		_ func(int) ([]FileNode, error)          = a.GetTree
 		_ func(int) ([]FileNode, error)          = a.GetRecentFiles
 		_ func(string, int) ([]SearchHit, error) = a.Search
+		_ func(int) (FileNode, error)            = a.GetFileInfo
+		_ func(int, int) (string, error)         = a.GetFileText
 		_ func(string) error                     = a.OpenFile
 		_ func(string) error                     = a.RevealFile
 		_ func(string) error                     = a.OpenURL

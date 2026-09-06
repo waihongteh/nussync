@@ -79,6 +79,44 @@ unsubmitted assignments/quizzes, plus announcements/grades notifications.
 - The Settings theme `<select>` binds to the `theme` store, not `draft.Theme`,
   so it always shows what the window is actually rendering.
 
+## In-app file viewer (2026-09-06)
+- Clicking a file previews it **inside the WebView** — no external process. Bytes
+  come from `assets.go`, registered as `assetserver.Options.Middleware` (NOT
+  `Handler`). This is the load-bearing detail: `Handler` only runs when the asset
+  lookup MISSES, and under `wails dev` the lookup proxies to Vite, whose SPA
+  fallback answers every unknown path with `index.html` 200 — so a `Handler`
+  never sees `/local/...` in dev. Verified: with `Handler` every probe returned
+  411 bytes of `text/html`; with `Middleware` it returns the real file in both
+  dev and the built exe.
+- Routes: `GET /local/{fileID}` (path looked up via `store.FileByID`) and
+  `GET /local/path?p=<abs>`, the latter 403 unless the path resolves inside
+  SyncDir (`filepath.Rel`, symlinks resolved, lower-cased on Windows — a naive
+  prefix test would let `…/NUSSyncOther` through). `http.ServeContent` gives
+  Content-Length + Range; we set Content-Type, `Accept-Ranges`,
+  `Cache-Control: no-store`, `nosniff`.
+- **File ids can be negative.** Downloaded papers live in the synthetic Papers
+  course and are numbered down from -1000, so the id route rejects only `0`.
+  Cost one debugging round; do not "tighten" it back to `id <= 0`.
+- Everything textual — including `.html`/`.htm` — is served as
+  `text/plain; charset=utf-8` and rendered by us, so course content never runs
+  as markup in the app's own origin. PDFs go into a **plain `<iframe>` with no
+  `sandbox` attribute**: sandboxing disables the Chromium PDF plugin and yields
+  a blank pane.
+- New bindings `GetFileInfo(fileID)` and `GetFileText(fileID, maxChars)` (FTS
+  text via `store.StudyFileText`, falling back to a live `index.Extract`) back
+  the docx/pptx/xlsx "Text preview" mode.
+- `components/Viewer.svelte` is the single preview component, reused by Files
+  (third pane, drag-resizable, width in localStorage `nussync.viewer.w`, Ctrl+P
+  toggles, Esc closes, ←/→ move the selection), Papers (library-card "Preview"),
+  Study (overview tab) and What's-new (right-click -> Preview overlay). It sets
+  `currentContext` to whatever it is showing, so the chat panel follows the
+  preview. Single click previews; double click still opens externally.
+- Verified 2026-09-06 against the running app: `/local/<id>` 200
+  `application/pdf` + 206 on Range, negative-id paper PDF 200, png/csv 200,
+  unknown id 404, malformed id 400, `C:\Windows\win.ini` 403; and in the
+  WebView the iframe's `contentDocument.contentType` is `application/pdf` with
+  `readyState: complete`, i.e. the built-in viewer really rendered it.
+
 ## Backend decisions (2026-09-05)
 - **Contract types live in package `main`** (`types.go`), not a shared package,
   so Wails binding generation emits them under the `main` namespace exactly as

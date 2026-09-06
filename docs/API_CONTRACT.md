@@ -86,6 +86,13 @@ GetTree(courseID int) ([]FileNode, error)          // full nested tree; courseID
                                                     // top-level dir node named Course.Code
 GetRecentFiles(limit int) ([]FileNode, error)       // newest ModifiedAt first
 Search(query string, courseID int) ([]SearchHit, error)  // courseID 0 = all; FTS over name + extracted text
+GetFileInfo(fileID int) (FileNode, error)            // one file's metadata (viewer header)
+GetFileText(fileID int, maxChars int) (string, error) // extracted plain text for the
+                                                    // in-app text preview (pptx/docx/xlsx and
+                                                    // any indexed format). Reads the FTS index,
+                                                    // falling back to a live extraction when the
+                                                    // file is not indexed yet; errors when the
+                                                    // format yields no text. maxChars <= 0 = no cap.
 OpenFile(path string) error                          // default app
 RevealFile(path string) error                        // explorer /select
 OpenURL(url string) error
@@ -110,6 +117,27 @@ Feature bindings added later (what's-new feed, assignment detail, window
 control) live in `docs/CONTRACT_FEATURES.md`. Study/AI lives in
 `docs/CONTRACT_STUDY.md`; the Papers tracker, paper summaries and the in-app
 Claude chat live in `docs/CONTRACT_PAPERS.md`.
+
+## Asset server routes (assets.go)
+
+Registered as `assetserver.Options.Handler`, so these sit on the same origin as
+the frontend (`wails://` in the app, `http://localhost:34115` under `wails dev`)
+and the WebView renders them with no external process. Everything not under
+`/local/` falls through to the embedded frontend.
+
+```
+GET /local/{fileID}      stream the synced file with that id (path from the store)
+GET /local/path?p={abs}  stream an absolute path — 403 unless it resolves inside
+                         SyncDir (symlinks resolved, case-insensitive on Windows)
+```
+
+Both answer with the mapped `Content-Type` (pdf; png/jpg/gif/svg/webp/bmp;
+everything textual — txt/md/csv/json/log/source code, **including .html/.htm** —
+as `text/plain; charset=utf-8` so course content never runs as markup in the
+app's origin), `Content-Length`, `Accept-Ranges: bytes` with full Range support
+(the Chromium PDF viewer seeks), `Cache-Control: no-store`, `X-Content-Type-
+Options: nosniff` and an inline `Content-Disposition`. 404 when the id is
+unknown or the file is not on disk, 400 for a malformed id, 405 for non-GET/HEAD.
 
 ## Events (EventsEmit from Go)
 - `sync:status` payload SyncStatus (throttled ~4/s)

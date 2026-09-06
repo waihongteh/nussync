@@ -2056,6 +2056,22 @@ export const mockAPI: AppAPI = {
       .slice(0, limit);
   },
 
+  GetFileInfo: async (fileID) => {
+    await delay(null, 40);
+    const f = ALL_FILES.find((x) => x.ID === fileID);
+    if (!f) throw new Error(`file ${fileID} not in the library`);
+    return { ...f };
+  },
+
+  GetFileText: async (fileID, maxChars) => {
+    await delay(null, 160);
+    const f = ALL_FILES.find((x) => x.ID === fileID);
+    if (!f) throw new Error(`file ${fileID} not in the library`);
+    const body = SNIPPETS.map((sn) => sn.replace(/<\/?b>/g, '')).join('\n\n');
+    const text = [f.Name, body].join('\n\n');
+    return maxChars > 0 && text.length > maxChars ? `${text.slice(0, maxChars)}\n…` : text;
+  },
+
   Search: async (query, courseID) => {
     await delay(null, 180);
     const q = query.trim().toLowerCase();

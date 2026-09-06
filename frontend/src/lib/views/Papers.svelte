@@ -8,8 +8,9 @@
    */
   import { api, errMsg, on } from '../api';
   import Icon from '../components/Icon.svelte';
+  import Viewer from '../components/Viewer.svelte';
   import { openChat, setContext, studyFile, toast } from '../stores';
-  import type { CitationLink, LibraryPaper, Paper, PaperDigest, PaperSummary, StudyJob } from '../types';
+  import type { CitationLink, FileNode, LibraryPaper, Paper, PaperDigest, PaperSummary, StudyJob } from '../types';
   import { lsGet, lsSet, markdownToHTML, relTime } from '../util';
 
   const MODEL_KEY = 'nussync.study.model';
@@ -326,6 +327,55 @@
       toast(errMsg(err), 'error');
     }
     summaryJob = null;
+  }
+
+  // ------------------------------------------------------- inline preview
+
+  /** Paper id whose PDF is previewed inline, plus the resolved file node. */
+  let previewID = $state('');
+  let previewFile = $state<FileNode | null>(null);
+
+  /**
+   * Toggle the in-app PDF preview. The Viewer needs a FileNode; papers only
+   * carry FileID/LocalPath, so ask the backend for the real row and fall back to
+   * a synthetic node when the PDF exists on disk but was never indexed.
+   */
+  async function togglePreview(p: LibraryPaper) {
+    if (previewID === p.ID) {
+      previewID = '';
+      previewFile = null;
+      return;
+    }
+    if (!p.LocalPath && !p.FileID) {
+      toast('Download the PDF first', 'info');
+      return;
+    }
+    previewID = p.ID;
+    previewFile = null;
+    setContext(p.FileID, p.ID, p.Title);
+    if (p.FileID) {
+      try {
+        previewFile = await api.getFileInfo(p.FileID);
+        return;
+      } catch (err) {
+        console.warn('[papers] getFileInfo failed, using the local path', err);
+      }
+    }
+    previewFile = {
+      ID: p.FileID,
+      CourseID: -1,
+      Name: p.LocalPath.split(/[\\/]/).pop() || `${p.Title}.pdf`,
+      Path: p.LocalPath,
+      RelPath: '',
+      IsDir: false,
+      Size: 0,
+      ModifiedAt: p.AddedAt,
+      Source: 'files',
+      Module: '',
+      Synced: !!p.LocalPath,
+      IsNew: false,
+      Children: null,
+    };
   }
 
   function chatAbout(p: LibraryPaper) {
@@ -705,10 +755,25 @@
                     <button class="btn sm" onclick={() => void download(p)} disabled={busyIDs.has(p.ID)}>
                       <Icon name="download" size={12} /> {p.LocalPath ? 'Re-download' : 'Download'}
                     </button>
+                    <button
+                      class="btn sm"
+                      class:on={previewID === p.ID}
+                      onclick={() => void togglePreview(p)}
+                      disabled={!p.LocalPath && !p.FileID}
+                      title={p.LocalPath || p.FileID ? 'Preview the PDF in the app' : 'Download the PDF first'}
+                    >
+                      <Icon name="eye" size={12} /> Preview
+                    </button>
                     <button class="btn sm" onclick={() => void openPaper(p)}><Icon name="external" size={12} /> Open</button>
                     <div class="grow"></div>
                     <button class="btn sm danger" onclick={() => void remove(p)}><Icon name="trash" size={12} /> Remove</button>
                   </div>
+
+                  {#if previewID === p.ID}
+                    <div class="ppreview">
+                      <Viewer file={previewFile} onClose={() => { previewID = ''; previewFile = null; }} />
+                    </div>
+                  {/if}
 
                   {#if running}
                     <div class="jobbar">
@@ -1334,6 +1399,21 @@
   .btn.danger:hover:not(:disabled) {
     border-color: var(--red);
     color: var(--red);
+  }
+
+  /* Inline PDF preview inside an expanded library card. */
+  .ppreview {
+    height: 62vh;
+    min-height: 340px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    display: flex;
+  }
+
+  .ppreview :global(.viewer) {
+    flex: 1;
+    min-width: 0;
   }
 
   .jobbar {

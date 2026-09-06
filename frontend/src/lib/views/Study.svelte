@@ -11,6 +11,7 @@
    */
   import { api, errMsg, on } from '../api';
   import Icon from '../components/Icon.svelte';
+  import Viewer from '../components/Viewer.svelte';
   import { courses, courseByID, setContext, studyPreselect, toast } from '../stores';
   import type { AskResult, FileNode, Flashcard, Overview, Quiz, QuizAttempt, StudyJob, StudyStatus } from '../types';
   import { fileKind, fmtBytes, lsGet, lsSet, markdownToHTML, relTime } from '../util';
@@ -57,6 +58,8 @@
   let pageCounts = $state<Map<number, number>>(new Map());
 
   let tab = $state<Tab>('overview');
+  /** In-app preview of the primary selection, on the overview tab. */
+  let previewOpen = $state(false);
 
   let job = $state<StudyJob | null>(null);
   let jobLine = $state('');
@@ -623,11 +626,29 @@
               {/if}
             </p>
           </div>
-          <button class="btn primary" onclick={genOverview} disabled={!ready || busy || !primary}>
-            <Icon name="layers" size={13} />
-            {overview ? 'Regenerate overview' : 'Generate overview'}
-          </button>
+          <div class="head-actions">
+            <button
+              class="btn"
+              class:on={previewOpen}
+              onclick={() => (previewOpen = !previewOpen)}
+              disabled={!primary}
+              title="Preview the selected file in the app"
+            >
+              <Icon name={previewOpen ? 'eyeOff' : 'eye'} size={13} />
+              Preview
+            </button>
+            <button class="btn primary" onclick={genOverview} disabled={!ready || busy || !primary}>
+              <Icon name="layers" size={13} />
+              {overview ? 'Regenerate overview' : 'Generate overview'}
+            </button>
+          </div>
         </div>
+
+        {#if previewOpen && primary}
+          <div class="spreview">
+            <Viewer file={primary} showStudy={false} onClose={() => (previewOpen = false)} />
+          </div>
+        {/if}
 
         {#if overviewLoading}
           <div class="empty"><span class="spinner"></span> Loading…</div>
@@ -1192,6 +1213,28 @@
     min-height: 0;
     overflow-y: auto;
     padding: 18px 20px 40px;
+  }
+
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+  }
+
+  .spreview {
+    height: 60vh;
+    min-height: 320px;
+    margin-bottom: 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+  }
+
+  .spreview :global(.viewer) {
+    flex: 1;
+    min-width: 0;
   }
 
   .pane-head {
