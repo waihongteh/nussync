@@ -14,6 +14,7 @@
   import type { Route } from '../stores';
   import type { FileNode } from '../types';
   import { playGame } from '../games/arcade';
+  import { resetLayout, toggleSidebar, toggleTree, toggleViewerFocus } from '../layout';
   import { fileKind, fmtBytes, fuzzyScore } from '../util';
   import Icon from './Icon.svelte';
 
@@ -118,6 +119,38 @@
       hint: 'Arcade',
       icon: 'trophy',
       run: () => playGame('quiz-rush'),
+    },
+    {
+      key: 'cmd:toggle-sidebar',
+      kind: 'command' as const,
+      label: 'Toggle sidebar',
+      hint: 'Layout · Ctrl+B',
+      icon: 'sidebarCollapse',
+      run: toggleSidebar,
+    },
+    {
+      key: 'cmd:toggle-tree',
+      kind: 'command' as const,
+      label: 'Toggle folder tree',
+      hint: 'Layout · Ctrl+Shift+E',
+      icon: 'panelLeft',
+      run: toggleTree,
+    },
+    {
+      key: 'cmd:toggle-focus',
+      kind: 'command' as const,
+      label: 'Toggle preview focus mode',
+      hint: 'Layout · Ctrl+Shift+P',
+      icon: 'expand',
+      run: toggleViewerFocus,
+    },
+    {
+      key: 'cmd:reset-layout',
+      kind: 'command' as const,
+      label: 'Reset layout',
+      hint: 'Layout',
+      icon: 'sort',
+      run: resetLayout,
     },
     {
       key: 'cmd:theme-light',

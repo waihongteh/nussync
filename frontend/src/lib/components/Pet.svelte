@@ -6,6 +6,14 @@
   import { bubble, level, levelProgress, mood, petName, pokePet, xp } from '../pet';
   import { equippedTitle, streak } from '../quest';
   import PetSprite from './PetSprite.svelte';
+  import { tip } from '../tooltip';
+
+  interface Props {
+    /** Rail mode: a 28px head, no level meter, quip bubble floats to the right. */
+    compact?: boolean;
+  }
+
+  let { compact = false }: Props = $props();
 
   let squashing = $state(false);
   let squashTimer: ReturnType<typeof setTimeout> | undefined;
@@ -27,29 +35,38 @@
   }
 </script>
 
-<div class="pet-slot">
+<div class="pet-slot" class:compact>
   {#if $bubble}
-    <div class="bubble" role="status">{$bubble}</div>
+    <div class="bubble" class:side={compact} role="status">{$bubble}</div>
   {:else}
     <!-- keep role=status mounted so updates are announced -->
     <div class="bubble-sr" role="status"></div>
   {/if}
 
-  <button class="pet" onclick={poke} aria-label={label} title="{$petName} — {$mood}" type="button">
-    <PetSprite mood={$mood} level={$level} size={76} squash={squashing} />
+  <button
+    class="pet"
+    onclick={poke}
+    aria-label={label}
+    title={compact ? undefined : `${$petName} — ${$mood}`}
+    use:tip={{ text: `${$petName} — ${$mood} · Lv ${$level}`, side: 'right', disabled: !compact }}
+    type="button"
+  >
+    <PetSprite mood={$mood} level={$level} size={compact ? 28 : 76} squash={squashing} />
   </button>
 
-  {#if $equippedTitle}
-    <span class="title-tag truncate" title="Equipped title">{$equippedTitle}</span>
-  {/if}
-
-  <div class="meta">
-    <span class="lv">Lv {$level}</span>
-    {#if $streak > 0}
-      <span class="streak" title="{$streak}-day streak">🔥{$streak}</span>
+  {#if !compact}
+    {#if $equippedTitle}
+      <span class="title-tag truncate" title="Equipped title">{$equippedTitle}</span>
     {/if}
-    <span class="xpbar"><span class="xpfill" style="width:{Math.round($levelProgress * 100)}%"></span></span>
-  </div>
+
+    <div class="meta">
+      <span class="lv">Lv {$level}</span>
+      {#if $streak > 0}
+        <span class="streak" title="{$streak}-day streak">🔥{$streak}</span>
+      {/if}
+      <span class="xpbar"><span class="xpfill" style="width:{Math.round($levelProgress * 100)}%"></span></span>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -65,10 +82,37 @@
     padding-bottom: 2px;
   }
 
+  .pet-slot.compact {
+    height: 40px;
+    margin: 0 0 2px;
+    justify-content: center;
+    padding-bottom: 0;
+  }
+
   .pet {
     display: block;
     border-radius: 50%;
     line-height: 0;
+  }
+
+  /* Rail: the quip cannot fit above a 56px column, so it floats to the right. */
+  .bubble.side {
+    left: calc(100% + 8px);
+    right: auto;
+    bottom: 4px;
+    width: 172px;
+    text-align: left;
+    z-index: 40;
+  }
+
+  .bubble.side::after {
+    left: -5px;
+    bottom: 12px;
+    margin-left: 0;
+    border-right: none;
+    border-bottom: none;
+    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
   }
 
   /* -------------------------------------------------------------- bubble */

@@ -950,3 +950,69 @@ authors + "et al.", `year · venue|preprint · N citations`, links, 1077 bytes /
   CASE in the upsert; plus first-run backlog suppression keyed
   `notify_backlog_v2` (the older `notify_bootstrapped` key was already set
   on this machine, so a new key was required).
+- Queued: chat panel docked (push content, resizable, persisted) instead of overlay; overlay as optional mode.
+
+## Layout: collapsible panes (2026-09-06, frontend-only)
+All of it lives in `frontend/src/lib/layout.ts` (plain stores, localStorage
+only — never backend settings) plus `resetLayout()`. Keys are namespaced
+`nussync.layout.*`.
+- **Sidebar has three tiers**, not two: `'auto' | 'expanded' | 'rail'`, default
+  `auto` (key `nussync.layout.sidebar`). `auto` = rail below 1100px window
+  width. An explicit Ctrl+B choice sticks until the window is *widened past*
+  1200px, at which point the mode drops back to `auto`. That revert is a
+  **crossing test against the previous width** (kept in `initLayout`), not a
+  plain `w > 1200` check — the naive version undoes a deliberate "rail" pick on
+  a wide monitor the instant it is made.
+- `initLayout()` (called from App's `$effect`) owns the resize listener and
+  writes `--sidebar-w` on `<html>` from the resolved mode (rail = 56px, else
+  `sidebarW`, 200–280). Everything that positions against the sidebar — the
+  drag ghost, the viewer's focus overlay — reads that one variable instead of
+  measuring. Sidebar width transition is 160ms; the global
+  `prefers-reduced-motion` rule in style.css already zeroes it.
+- Rail contents: icon-only nav (badge count collapses to a dot, count moves
+  into the tooltip), courses as colour dots (hidden courses omitted, no
+  drag-reorder), `Pet compact` = a 28px sprite whose quip bubble floats to the
+  right, `SyncPill compact` = one button with an SVG progress ring. The compact
+  pill **keeps the `.pill` class**: PetOverlay's wander `dockSpot()` and
+  `busyStep()` query `aside.sidebar .pill`, so renaming it would break the
+  pet's hop target. `data-nav="deadlines"` likewise stays on rail nav buttons.
+- **Tooltips**: `lib/tooltip.ts` exports a `use:tip` action feeding one shared
+  store; `components/Tooltip.svelte` (mounted once in App) renders the single
+  bubble. 400ms on hover, instant on focus, right-positioned, dismissed by any
+  key/scroll/resize. Not `title=` — the OS tooltip is slow and unstyleable.
+- **Files tree**: `treeOpen` (`nussync.layout.tree`, default open),
+  `treeW` (180–420). Toggle = toolbar `panelLeft` button, Ctrl+Shift+E, palette.
+  Auto-hides when the *panes row* (measured with a ResizeObserver, not the
+  window) is under 900px and a viewer is open — the user's preference is left
+  alone, so it returns on widening. The list breadcrumb is now a clickable
+  crumb trail rooted at "All files", because with the tree hidden it is the
+  only way up; crumb keys are the same `courseID:relPath` keys as the tree.
+- **Viewer focus mode** lives inside `Viewer.svelte` (so Files, Papers, Study
+  and What's-new all get it): `viewerFocus` store, *not* persisted, cleared on
+  the component's own teardown so the next preview never opens expanded.
+  Ctrl+Shift+P, header double-click or the expand button; a slim strip adds the
+  breadcrumb, ←/→ (hosts pass `onPrev`/`onNext` when they have a list) and Exit.
+  The focused pane is `position: fixed` at `top: var(--topbar-h);
+  left: var(--sidebar-w)`. Esc is handled there — **hosts must skip their own
+  Esc/arrow handling while `$viewerFocus`** (Files and What's-new do;
+  `stopPropagation` is not enough between two `<svelte:window>` listeners).
+  Files' Ctrl+P also had to exclude Shift, or it swallowed Ctrl+Shift+P.
+- `components/ResizeHandle.svelte` replaces the ad-hoc handle in Files and now
+  drives the sidebar, tree and viewer. **Delta-based** (start value + pointer
+  delta, `invert` for a pane on the right) rather than "pane width = pointer x −
+  pane left", so a clamped pane does not jump when the pointer returns. Arrow
+  keys resize when focused (Shift = bigger step), double-click resets to the
+  default. It is a focusable `role="separator"` div: a `<button>` may not take
+  that role (svelte-check a11y error).
+- Settings → App grew a "Layout" sub-section (sidebar mode select + Reset
+  layout); the palette gained Toggle sidebar / folder tree / preview focus mode
+  / Reset layout, with the shortcut in the hint column.
+- Verified 2026-09-06: `npm run check` 0 errors/0 warnings, `npm run build` ok;
+  in-browser at 1400/1300/1000/880px — Ctrl+B, auto-rail, the 1200px revert,
+  tooltips (light + dark), tree toggle + persistence, all three drags and a
+  double-click reset, tree auto-hide at 824px panes, focus mode via button and
+  palette, Esc exit. No console errors.
+  Note for future browser checks: the in-app Browser pane throttles frames, so
+  CSS transitions and ResizeObserver callbacks appear frozen until a screenshot
+  forces a frame, and `resize_window` does not always fire a `resize` event —
+  dispatch one manually when testing width-dependent logic.

@@ -20,6 +20,7 @@
   import type { FileNode } from '../types';
   import { ext, fmtBytes, fmtDateTime, markdownToHTML } from '../util';
   import { recordPreview } from '../quest';
+  import { viewerFocus } from '../layout';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -28,9 +29,60 @@
     onClose?: () => void;
     /** Hide the Study button where it makes no sense (the Study view itself). */
     showStudy?: boolean;
+    /** Focus-mode navigation. Hosts with a list pass these; others omit them. */
+    onPrev?: () => void;
+    onNext?: () => void;
+    /** Focus-mode breadcrumb; falls back to the file's own path. */
+    crumb?: string;
   }
 
-  let { file, onClose, showStudy = true }: Props = $props();
+  let { file, onClose, showStudy = true, onPrev, onNext, crumb = '' }: Props = $props();
+
+  // -------------------------------------------------------------- focus mode
+
+  /**
+   * Focus lives in the layout store so the palette and the hosts can drive it,
+   * but only a Viewer with something to show honours it — and leaving one
+   * always drops it, so the next preview never opens already-expanded.
+   */
+  const focused = $derived($viewerFocus && !!file);
+
+  $effect(() => () => viewerFocus.set(false));
+
+  function toggleFocus() {
+    if (file) viewerFocus.update((v) => !v);
+  }
+
+  function onWinKey(e: KeyboardEvent) {
+    if (!file) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+      e.preventDefault();
+      toggleFocus();
+      return;
+    }
+    if (!focused) return;
+    if (e.key === 'Escape') {
+      // Swallow it so the host does not also close the pane underneath.
+      e.preventDefault();
+      e.stopPropagation();
+      viewerFocus.set(false);
+      return;
+    }
+    const el = e.target as HTMLElement | null;
+    if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      if (!onPrev) return;
+      e.preventDefault();
+      onPrev();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      if (!onNext) return;
+      e.preventDefault();
+      onNext();
+    }
+  }
+
+  const crumbText = $derived(crumb || file?.RelPath || file?.Name || '');
 
   /** How the preview is rendered. */
   type Mode = 'pdf' | 'image' | 'text' | 'markdown' | 'extracted' | 'none';
@@ -197,14 +249,34 @@
   });
 </script>
 
-<section class="viewer" aria-label="File preview">
+<svelte:window onkeydown={onWinKey} />
+
+<section class="viewer" class:focused aria-label="File preview">
+  {#if focused}
+    <div class="strip">
+      <span class="strip-crumb truncate" title={crumbText}>{crumbText}</span>
+      <div class="strip-nav">
+        <button class="icon-btn" onclick={() => onPrev?.()} disabled={!onPrev} aria-label="Previous file">
+          <Icon name="chevronLeft" size={14} />
+        </button>
+        <button class="icon-btn" onclick={() => onNext?.()} disabled={!onNext} aria-label="Next file">
+          <Icon name="chevronRight" size={14} />
+        </button>
+      </div>
+      <button class="btn sm" onclick={() => viewerFocus.set(false)} title="Leave focus mode (Esc)">
+        <Icon name="shrink" size={12} /> Exit
+      </button>
+    </div>
+  {/if}
+
   {#if !file}
     <div class="blank">
       <Icon name="eye" size={22} />
       <p>Select a file to preview it here.</p>
     </div>
   {:else}
-    <header class="vhead">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <header class="vhead" ondblclick={toggleFocus}>
       <div class="vtitle">
         <span class="vname truncate" title={file.RelPath || file.Name}>{file.Name}</span>
         <span class="vmeta truncate">
@@ -232,6 +304,15 @@
             <Icon name="layers" size={12} />
           </button>
         {/if}
+        <button
+          class="icon-btn"
+          onclick={toggleFocus}
+          aria-pressed={focused}
+          title={focused ? 'Leave focus mode (Ctrl+Shift+P)' : 'Focus mode (Ctrl+Shift+P)'}
+          aria-label={focused ? 'Leave focus mode' : 'Focus mode'}
+        >
+          <Icon name={focused ? 'shrink' : 'expand'} size={13} />
+        </button>
         {#if onClose}
           <button class="icon-btn" onclick={onClose} aria-label="Close preview (Esc)"><Icon name="x" size={13} /></button>
         {/if}
@@ -294,6 +375,66 @@
     min-height: 0;
     height: 100%;
     background: var(--bg-elevated);
+  }
+
+  /**
+   * Focus mode covers the content area — everything right of the sidebar and
+   * below the top bar. `--sidebar-w` is kept live by lib/layout.ts, so the rail
+   * and a dragged sidebar both land correctly.
+   */
+  .viewer.focused {
+    position: fixed;
+    top: var(--topbar-h);
+    left: var(--sidebar-w);
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    height: auto;
+    border-left: 1px solid var(--border);
+  }
+
+  .strip {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 30px;
+    padding: 0 8px 0 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-subtle);
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  .strip-crumb {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .strip-nav {
+    display: flex;
+    gap: 2px;
+  }
+
+  .icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    color: var(--text-faint);
+    transition: background var(--t), color var(--t);
+  }
+
+  .icon-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .icon-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .blank {

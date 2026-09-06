@@ -8,6 +8,7 @@
   import ContextMenu from '../components/ContextMenu.svelte';
   import Icon from '../components/Icon.svelte';
   import Viewer from '../components/Viewer.svelte';
+  import { viewerFocus } from '../layout';
   import { courseByID, toast, unseenCount } from '../stores';
   import type { FeedItem, FileNode, MenuItem } from '../types';
   import { fileKind, fmtBytes, relTime } from '../util';
@@ -271,7 +272,7 @@
   </div>
 {/if}
 
-<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && preview) preview = null; }} />
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && preview && !$viewerFocus) preview = null; }} />
 
 {#if menu}
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />

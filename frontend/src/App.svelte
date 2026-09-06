@@ -5,6 +5,8 @@
   import PetOverlay from './lib/components/PetOverlay.svelte';
   import Sidebar from './lib/components/Sidebar.svelte';
   import Toasts from './lib/components/Toasts.svelte';
+  import Tooltip from './lib/components/Tooltip.svelte';
+  import { initLayout, toggleSidebar } from './lib/layout';
   import {
     chatOpen,
     initTheme,
@@ -50,11 +52,13 @@
     const teardown = wireEvents();
     const petTeardown = initPet();
     const questTeardown = initQuest();
+    const layoutTeardown = initLayout();
     void loadAll();
     return () => {
       teardown();
       questTeardown();
       petTeardown();
+      layoutTeardown();
     };
   });
 
@@ -68,6 +72,11 @@
     if (mod && (e.key === 'j' || e.key === 'J')) {
       e.preventDefault();
       chatOpen.update((v) => !v);
+      return;
+    }
+    if (mod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
+      e.preventDefault();
+      toggleSidebar();
       return;
     }
     if (mod && e.key === ',') {
@@ -153,6 +162,7 @@
 <ChatPanel />
 <CommandPalette />
 <Toasts />
+<Tooltip />
 
 <style>
   .shell {

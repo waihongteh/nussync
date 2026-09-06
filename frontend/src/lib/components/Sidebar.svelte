@@ -17,8 +17,19 @@
   import ContextMenu from './ContextMenu.svelte';
   import Icon from './Icon.svelte';
   import Pet from './Pet.svelte';
+  import ResizeHandle from './ResizeHandle.svelte';
   import SyncPill from './SyncPill.svelte';
   import { petEnabled, petMode } from '../pet';
+  import {
+    SIDEBAR_W_DEFAULT,
+    SIDEBAR_W_MAX,
+    SIDEBAR_W_MIN,
+    isRail,
+    setSidebarWidth,
+    sidebarW,
+    toggleSidebar,
+  } from '../layout';
+  import { tip } from '../tooltip';
 
   const NAV: Array<{ id: Route; label: string; icon: string }> = [
     { id: 'home', label: 'Home', icon: 'home' },
@@ -52,6 +63,13 @@
   function pickCourse(id: number) {
     selectedCourseID.set($selectedCourseID === id ? 0 : id);
     navigate('files');
+  }
+
+  const rail = $derived($isRail);
+
+  /** Rail tooltip for a nav row — the badge count moves in here. */
+  function navTip(label: string, badge: number): string {
+    return badge > 0 ? `${label} · ${badge}` : label;
   }
 
   // ------------------------------------------------------- order / hiding
@@ -206,13 +224,24 @@
   }
 </script>
 
-<aside class="sidebar">
-  <div class="brand">
-    <span class="mark" aria-hidden="true"></span>
-    <span class="word">NUSSync</span>
+<aside class="sidebar" class:rail>
+  <div class="brand" class:rail>
+    {#if !rail}
+      <span class="mark" aria-hidden="true"></span>
+      <span class="word">NUSSync</span>
+    {/if}
+    <button
+      class="toggle"
+      onclick={toggleSidebar}
+      use:tip={{ text: rail ? 'Expand sidebar · Ctrl+B' : 'Collapse sidebar · Ctrl+B', side: 'right' }}
+      aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+      aria-expanded={!rail}
+    >
+      <Icon name={rail ? 'sidebarExpand' : 'sidebarCollapse'} size={15} />
+    </button>
   </div>
 
-  <nav class="nav">
+  <nav class="nav" class:rail>
     {#each NAV as item (item.id)}
       {@const badge = badgeFor(item.id)}
       <button
@@ -221,14 +250,38 @@
         class:active={$route === item.id}
         onclick={() => navigate(item.id)}
         aria-current={$route === item.id ? 'page' : undefined}
+        aria-label={rail ? navTip(item.label, badge) : undefined}
+        use:tip={{ text: navTip(item.label, badge), side: 'right', disabled: !rail }}
       >
         <Icon name={item.icon} size={15} />
-        <span class="nav-label">{item.label}</span>
-        {#if badge > 0}<span class="badge">{badge}</span>{/if}
+        {#if !rail}<span class="nav-label">{item.label}</span>{/if}
+        {#if badge > 0}
+          {#if rail}<span class="bdot" aria-hidden="true"></span>{:else}<span class="badge">{badge}</span>{/if}
+        {/if}
       </button>
     {/each}
   </nav>
 
+  {#if rail}
+    <!-- Rail courses: colour dots only, no reordering and no hidden section. -->
+    <div class="courses rail">
+      <div class="course-list rail">
+        {#each visible as c (c.ID)}
+          <button
+            class="cdot"
+            class:active={$selectedCourseID === c.ID}
+            class:off={!c.Enabled}
+            onclick={() => pickCourse(c.ID)}
+            aria-label={c.Code}
+            aria-pressed={$selectedCourseID === c.ID}
+            use:tip={{ text: `${c.Code} · ${c.FileCount} files`, side: 'right' }}
+          >
+            <span class="dot" style="background:{c.Color}"></span>
+          </button>
+        {/each}
+      </div>
+    </div>
+  {:else}
   <div class="courses">
     <div class="courses-head">
       <span class="section-title">Courses</span>
@@ -298,13 +351,26 @@
       {/if}
     </div>
   </div>
+  {/if}
 
   <!-- Docked pet only in 'dock' mode; the other modes render in PetOverlay. -->
   {#if $petEnabled && $petMode === 'dock'}
-    <Pet />
+    <Pet compact={rail} />
   {/if}
 
-  <SyncPill />
+  <SyncPill compact={rail} />
+
+  {#if !rail}
+    <ResizeHandle
+      value={$sidebarW}
+      min={SIDEBAR_W_MIN}
+      max={SIDEBAR_W_MAX}
+      def={SIDEBAR_W_DEFAULT}
+      label="Resize the sidebar"
+      absolute
+      onChange={setSidebarWidth}
+    />
+  {/if}
 </aside>
 
 {#if ghost && dragID}
@@ -323,6 +389,7 @@
 
 <style>
   .sidebar {
+    position: relative;
     width: var(--sidebar-w);
     flex: none;
     display: flex;
@@ -330,6 +397,8 @@
     min-height: 0;
     background: var(--bg-sidebar);
     border-right: 1px solid var(--border);
+    /* The rail transition. Killed by the global reduced-motion rule. */
+    transition: width 160ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .brand {
@@ -339,6 +408,32 @@
     height: var(--topbar-h);
     padding: 0 14px;
     flex: none;
+  }
+
+  .brand.rail {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    margin-left: auto;
+    border-radius: var(--radius-sm);
+    color: var(--text-faint);
+    transition: background var(--t), color var(--t);
+  }
+
+  .brand.rail .toggle {
+    margin: 0;
+  }
+
+  .toggle:hover {
+    background: var(--bg-hover);
+    color: var(--text);
   }
 
   .mark {
@@ -410,6 +505,76 @@
   .nav-item.active .badge {
     background: var(--accent);
     color: #fff;
+  }
+
+  /* ------------------------------------------------------------------ rail */
+
+  .nav.rail {
+    align-items: center;
+    padding: 4px 0 10px;
+  }
+
+  .nav.rail .nav-item {
+    width: 34px;
+    height: 32px;
+    padding: 0;
+    justify-content: center;
+    position: relative;
+  }
+
+  .bdot {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px var(--bg-sidebar);
+  }
+
+  .courses.rail {
+    padding: 0;
+    align-items: center;
+  }
+
+  .course-list.rail {
+    align-items: center;
+    gap: 3px;
+    padding-bottom: 10px;
+  }
+
+  .cdot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 24px;
+    flex: none;
+    border-radius: var(--radius-sm);
+    transition: background var(--t);
+  }
+
+  .cdot:hover {
+    background: var(--bg-hover);
+  }
+
+  .cdot.active {
+    background: var(--bg-active);
+  }
+
+  .cdot.active .dot {
+    box-shadow: 0 0 0 2px var(--bg-sidebar), 0 0 0 3.5px var(--accent);
+  }
+
+  .cdot.off {
+    opacity: 0.4;
+  }
+
+  .cdot .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
   }
 
   .courses {

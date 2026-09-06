@@ -2,6 +2,14 @@
   import { cancelSync, syncNow, syncStatus } from '../stores';
   import { relTime } from '../util';
   import Icon from './Icon.svelte';
+  import { tip } from '../tooltip';
+
+  interface Props {
+    /** Rail mode: one icon button with a progress ring, status in the tooltip. */
+    compact?: boolean;
+  }
+
+  let { compact = false }: Props = $props();
 
   let tick = $state(Date.now());
   $effect(() => {
@@ -24,8 +32,40 @@
   );
   const detail = $derived(s.CurrentFile || s.Course || '');
   const lastRun = $derived(relTime(s.LastRun, tick));
+
+  // ------------------------------------------------------------------ rail
+
+  /** r=8 ring; the dash offset walks the circumference as the sync progresses. */
+  const C = 2 * Math.PI * 8;
+  const dash = $derived(C * (1 - pct / 100));
+
+  const compactTip = $derived(
+    s.Running
+      ? `${phaseLabel}${s.Total > 0 ? ` ${s.Done}/${s.Total}` : ''}${detail ? ` · ${detail}` : ''} · click to cancel`
+      : s.Phase === 'error'
+        ? `Sync failed${s.LastError ? `: ${s.LastError}` : ''} · click to retry`
+        : `Last synced ${lastRun} · click to sync now`,
+  );
 </script>
 
+{#if compact}
+  <button
+    class="pill mini"
+    class:running={s.Running}
+    class:error={s.Phase === 'error'}
+    onclick={() => (s.Running ? cancelSync() : syncNow())}
+    aria-label={compactTip}
+    use:tip={{ text: compactTip, side: 'right' }}
+  >
+    {#if s.Running}
+      <svg class="ring" viewBox="0 0 20 20" aria-hidden="true">
+        <circle class="ring-track" cx="10" cy="10" r="8" />
+        <circle class="ring-fill" cx="10" cy="10" r="8" stroke-dasharray={C} stroke-dashoffset={dash} />
+      </svg>
+    {/if}
+    <Icon name={s.Phase === 'error' ? 'alert' : s.Running ? 'sync' : 'check'} size={14} />
+  </button>
+{:else}
 <div class="pill" class:running={s.Running} class:error={s.Phase === 'error'}>
   <div class="row">
     <span class="state">
@@ -59,8 +99,60 @@
     <div class="sub">Last synced {lastRun}</div>
   {/if}
 </div>
+{/if}
 
 <style>
+  /* ------------------------------------------------------------------ rail */
+
+  .pill.mini {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    margin: 0 auto 10px;
+    padding: 0;
+    color: var(--text-muted);
+  }
+
+  .pill.mini:hover {
+    background: var(--bg-hover);
+  }
+
+  .pill.mini.running {
+    color: var(--accent-text);
+  }
+
+  .pill.mini.error {
+    color: var(--red);
+  }
+
+  .ring {
+    position: absolute;
+    inset: 5px;
+    width: 24px;
+    height: 24px;
+    transform: rotate(-90deg);
+    overflow: visible;
+  }
+
+  .ring-track,
+  .ring-fill {
+    fill: none;
+    stroke-width: 2;
+  }
+
+  .ring-track {
+    stroke: var(--border);
+  }
+
+  .ring-fill {
+    stroke: var(--accent);
+    stroke-linecap: round;
+    transition: stroke-dashoffset 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
   .pill {
     margin: 0 10px 10px;
     padding: 9px 10px;

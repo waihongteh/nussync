@@ -6,6 +6,8 @@
 
   import { courses, loadCourses, settings, theme, toast } from '../stores';
   import { hideNonAcademic } from '../courseOrder';
+  import { resetLayout, sidebarMode } from '../layout';
+  import type { SidebarMode } from '../layout';
   import type { Settings, StudyStatus, TelegramStatus } from '../types';
   import { deepEqual, durLabel, lsGet, lsSet, parseDurLabel } from '../util';
 
@@ -667,6 +669,38 @@
               <span class="help">Start NUSSync minimised when Windows starts.</span>
             </span>
           </label>
+
+          <!-- Layout: local to this machine, so nothing here touches `draft`. -->
+          <div class="sub-head">Layout</div>
+
+          <label class="field narrow">
+            <span class="lbl">Sidebar</span>
+            <select
+              class="select"
+              value={$sidebarMode}
+              onchange={(e) => sidebarMode.set(e.currentTarget.value as SidebarMode)}
+            >
+              <option value="auto">Auto (rail on a narrow window)</option>
+              <option value="expanded">Always expanded</option>
+              <option value="rail">Always a rail</option>
+            </select>
+            <span class="help">
+              Ctrl+B collapses it to the icon rail. An explicit choice reverts to Auto once the window is wide again.
+            </span>
+          </label>
+
+          <div class="field start">
+            <button
+              class="btn"
+              onclick={() => {
+                resetLayout();
+                toast('Layout reset', 'success');
+              }}
+            >
+              <Icon name="sort" size={13} /> Reset layout
+            </button>
+            <span class="help">Sidebar mode and width, folder tree visibility and width, preview focus.</span>
+          </div>
         </div>
       </section>
 
@@ -1056,6 +1090,17 @@
 
   .field.start {
     align-items: flex-start;
+  }
+
+  .sub-head {
+    margin-top: 4px;
+    padding-top: 13px;
+    border-top: 1px solid var(--border);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-faint);
   }
 
   /* segmented control (pet placement) */

@@ -3,7 +3,19 @@
   import ContextMenu from '../components/ContextMenu.svelte';
   import FolderTree from '../components/FolderTree.svelte';
   import Icon from '../components/Icon.svelte';
+  import ResizeHandle from '../components/ResizeHandle.svelte';
   import Viewer from '../components/Viewer.svelte';
+  import {
+    TREE_AUTOHIDE_BELOW,
+    TREE_W_DEFAULT,
+    TREE_W_MAX,
+    TREE_W_MIN,
+    setTreeWidth,
+    toggleTree,
+    treeOpen,
+    treeW,
+    viewerFocus,
+  } from '../layout';
   import { courses, courseByID, flatFiles, openChat, openFileNode, selectedCourseID, setContext, toast } from '../stores';
   import type { FileNode, MenuItem, SearchHit } from '../types';
   import { debounce, fileKind, fmtBytes, lsGet, lsSet, relTime, snippetHTML } from '../util';
@@ -37,8 +49,24 @@
   let tick = $state(Date.now());
   let viewerOpen = $state(false);
   let viewerW = $state(Math.max(VIEWER_MIN, lsGet<number>(VIEWER_W_KEY, 520)));
-  let dragging = $state(false);
   let panesEl = $state<HTMLDivElement | null>(null);
+  /** Measured width of the panes row, for the tree's auto-hide rule. */
+  let panesW = $state(1200);
+
+  $effect(() => {
+    const el = panesEl;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(([entry]) => (panesW = entry.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
+  /**
+   * The tree yields to the viewer on a narrow content area — the breadcrumb is
+   * still there to navigate with, which is exactly why it grew an "All files"
+   * root. The user's own preference is untouched, so it comes back on resize.
+   */
+  const treeShown = $derived($treeOpen && !(viewerOpen && panesW < TREE_AUTOHIDE_BELOW));
 
   $effect(() => {
     const h = setInterval(() => (tick = Date.now()), 60_000);
@@ -223,11 +251,20 @@
   }
 
   function onKey(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+    const mod = e.ctrlKey || e.metaKey;
+    // Ctrl+Shift+P belongs to the viewer's focus mode, so shift is excluded.
+    if (mod && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
       e.preventDefault();
       toggleViewer();
       return;
     }
+    if (mod && e.shiftKey && (e.key === 'e' || e.key === 'E')) {
+      e.preventDefault();
+      toggleTree();
+      return;
+    }
+    // In focus mode the Viewer owns Esc and the arrows.
+    if ($viewerFocus) return;
     if (e.key === 'Escape' && viewerOpen && !menu) {
       // Only when the search box is not the one asking to be cleared.
       if (!(inField(e.target) && query)) {
@@ -248,34 +285,11 @@
 
   // ------------------------------------------------------- viewer resizing
 
-  function startDrag(e: PointerEvent) {
-    e.preventDefault();
-    dragging = true;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
+  /** Always leave room for the list pane (and the tree, when it is showing). */
+  const viewerMax = $derived(Math.max(VIEWER_MIN, panesW - (treeShown ? $treeW : 0) - 300));
 
-  function onDrag(e: PointerEvent) {
-    if (!dragging || !panesEl) return;
-    const rect = panesEl.getBoundingClientRect();
-    // Leave room for the tree + list panes on the left.
-    const max = Math.max(VIEWER_MIN, rect.width - 520);
-    viewerW = Math.min(max, Math.max(VIEWER_MIN, rect.right - e.clientX));
-  }
-
-  function endDrag(e: PointerEvent) {
-    if (!dragging) return;
-    dragging = false;
-    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
-    lsSet(VIEWER_W_KEY, Math.round(viewerW));
-  }
-
-  /** Keyboard-resizable handle, for anyone not using a pointer. */
-  function handleKey(e: KeyboardEvent) {
-    const d = e.key === 'ArrowLeft' ? 24 : e.key === 'ArrowRight' ? -24 : 0;
-    if (!d) return;
-    e.preventDefault();
-    e.stopPropagation();
-    viewerW = Math.max(VIEWER_MIN, viewerW + d);
+  function setViewerW(v: number) {
+    viewerW = Math.min(viewerMax, Math.max(VIEWER_MIN, v));
     lsSet(VIEWER_W_KEY, Math.round(viewerW));
   }
 
@@ -315,15 +329,44 @@
   /** Snippet-bearing hits only — plain filename matches are already in the table. */
   const contentHits = $derived(serverHits.filter((h) => h.Snippet));
 
-  const breadcrumb = $derived.by(() => {
-    if (!activeFolder) return $selectedCourseID ? $courseByID.get($selectedCourseID)?.Code ?? 'All files' : 'All files';
-    const code = $courseByID.get(activeFolder.CourseID)?.Code ?? '';
-    return activeFolder.RelPath ? `${code} / ${activeFolder.RelPath.replace(/\//g, ' / ')}` : code;
+  /**
+   * Clickable crumb trail. With the tree hidden this is the only way up, so it
+   * always starts at an "All files" root, then the course, then each folder.
+   * `key` matches `keyOf`, which makes every crumb directly selectable.
+   */
+  const crumbs = $derived.by(() => {
+    const out: Array<{ label: string; key: string }> = [{ label: 'All files', key: '' }];
+    if (!activeFolder) return out;
+    const cid = activeFolder.CourseID;
+    out.push({ label: $courseByID.get(cid)?.Code ?? '—', key: `${cid}:` });
+    let acc = '';
+    for (const seg of activeFolder.RelPath ? activeFolder.RelPath.split('/') : []) {
+      acc = acc ? `${acc}/${seg}` : seg;
+      out.push({ label: seg, key: `${cid}:${acc}` });
+    }
+    return out;
   });
+
+  const breadcrumb = $derived(crumbs.map((c) => c.label).join(' / '));
+
+  function goCrumb(key: string) {
+    selectedFolder = key;
+    lsSet(SELECTED_KEY, key);
+  }
 </script>
 
 <div class="files">
   <div class="toolbar">
+    <button
+      class="btn sm tree-toggle"
+      class:on={$treeOpen}
+      onclick={toggleTree}
+      title="Toggle the folder tree (Ctrl+Shift+E)"
+      aria-label="Toggle the folder tree"
+      aria-pressed={$treeOpen}
+    >
+      <Icon name="panelLeft" size={14} />
+    </button>
     <div class="search">
       <Icon name="search" size={14} />
       <input
@@ -361,7 +404,8 @@
   </div>
 
   <div class="panes" bind:this={panesEl}>
-    <div class="tree-pane">
+    {#if treeShown}
+    <div class="tree-pane" style="width:{$treeW}px">
       <button
         class="all-row"
         class:sel={selectedFolder === ''}
@@ -389,10 +433,29 @@
         {/if}
       </div>
     </div>
+    <ResizeHandle
+      value={$treeW}
+      min={TREE_W_MIN}
+      max={TREE_W_MAX}
+      def={TREE_W_DEFAULT}
+      label="Resize the folder tree"
+      onChange={setTreeWidth}
+    />
+    {/if}
 
     <div class="list-pane">
       <div class="crumb">
-        <span class="crumb-path truncate">{breadcrumb}</span>
+        <nav class="crumb-path" aria-label="Folder breadcrumb">
+          {#each crumbs as c, i (c.key)}
+            {#if i > 0}<span class="sep" aria-hidden="true">/</span>{/if}
+            <button
+              class="crumb-btn truncate"
+              class:last={i === crumbs.length - 1}
+              onclick={() => goCrumb(c.key)}
+              disabled={i === crumbs.length - 1}
+            >{c.label}</button>
+          {/each}
+        </nav>
         <span class="crumb-meta">{visibleFiles.length} files · {fmtBytes(totalBytes)}</span>
       </div>
 
@@ -457,19 +520,23 @@
     </div>
 
     {#if viewerOpen}
-      <button
-        type="button"
-        class="vhandle"
-        class:dragging
-        aria-label="Resize the preview pane (arrow keys)"
-        onpointerdown={startDrag}
-        onpointermove={onDrag}
-        onpointerup={endDrag}
-        onpointercancel={endDrag}
-        onkeydown={handleKey}
-      ></button>
+      <ResizeHandle
+        value={viewerW}
+        min={VIEWER_MIN}
+        max={viewerMax}
+        def={520}
+        invert
+        label="Resize the preview pane"
+        onChange={setViewerW}
+      />
       <div class="viewer-pane" style="width:{viewerW}px">
-        <Viewer file={previewFile} onClose={closeViewer} />
+        <Viewer
+          file={previewFile}
+          onClose={closeViewer}
+          crumb={previewFile ? `${breadcrumb} / ${previewFile.Name}` : breadcrumb}
+          onPrev={visibleFiles.length > 1 ? () => step(-1) : undefined}
+          onNext={visibleFiles.length > 1 ? () => step(1) : undefined}
+        />
       </div>
     {/if}
   </div>
@@ -565,34 +632,20 @@
     min-width: 0;
   }
 
-  /* 5px grab strip, widened by a ::before so it is easy to hit. */
-  .vhandle {
+  .tree-toggle {
     flex: none;
-    width: 5px;
+    width: 32px;
     padding: 0;
-    border: none;
-    border-radius: 0;
-    cursor: col-resize;
-    background: var(--border);
-    position: relative;
-    touch-action: none;
+    justify-content: center;
+    color: var(--text-faint);
   }
 
-  .vhandle::before {
-    content: '';
-    position: absolute;
-    inset: 0 -3px;
-  }
-
-  .vhandle:hover,
-  .vhandle:focus-visible,
-  .vhandle.dragging {
-    background: var(--accent);
-    outline: none;
+  .tree-toggle.on {
+    color: var(--accent-text);
+    border-color: var(--border-strong);
   }
 
   .tree-pane {
-    width: 250px;
     flex: none;
     display: flex;
     flex-direction: column;
@@ -671,8 +724,37 @@
   }
 
   .crumb-path {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
     font-weight: 550;
     color: var(--text);
+  }
+
+  .crumb-btn {
+    max-width: 220px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 550;
+    transition: background var(--t), color var(--t);
+  }
+
+  .crumb-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .crumb-btn.last {
+    color: var(--text);
+    cursor: default;
+  }
+
+  .sep {
+    color: var(--text-faint);
+    flex: none;
   }
 
   .crumb-meta {

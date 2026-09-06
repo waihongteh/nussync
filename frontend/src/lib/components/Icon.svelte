@@ -68,6 +68,11 @@
     quote: '<path d="M8 5.6C5.8 6.4 4.4 8.2 4.4 10.4v4h4.4v-4H6.6c0-1.6.6-2.6 1.4-3.2z"/><path d="M15.6 5.6c-2.2.8-3.6 2.6-3.6 4.8v4h4.4v-4h-2.2c0-1.6.6-2.6 1.4-3.2z"/>',
     sword: '<path d="M16.6 3.4 8.8 11.2"/><path d="M16.6 3.4h-3.2l-6.2 6.2 3.2 3.2 6.2-6.2z"/><path d="m7.4 11.4-3 3 3.2 3.2 3-3"/><path d="m4.6 14.8-1.8 1.8"/><path d="m9.6 14.6 1.8 1.8"/>',
     dot: '<circle cx="10" cy="10" r="3.4"/>',
+    panelLeft: '<rect x="2.8" y="3.4" width="14.4" height="13.2" rx="1.6"/><path d="M8 3.4v13.2"/>',
+    sidebarCollapse: '<rect x="2.8" y="3.4" width="14.4" height="13.2" rx="1.6"/><path d="M8 3.4v13.2"/><path d="m14 8 -2 2 2 2"/>',
+    sidebarExpand: '<rect x="2.8" y="3.4" width="14.4" height="13.2" rx="1.6"/><path d="M8 3.4v13.2"/><path d="m12 8 2 2-2 2"/>',
+    expand: '<path d="M12.2 3.6h4.2v4.2"/><path d="M7.8 16.4H3.6v-4.2"/><path d="m16.4 3.6-5 5"/><path d="m3.6 16.4 5-5"/>',
+    shrink: '<path d="M16.4 8.4h-4.2V4.2"/><path d="M3.6 11.6h4.2v4.2"/><path d="m12.2 8.4 4.2-4.2"/><path d="m7.8 11.6-4.2 4.2"/>',
   };
 
   const d = $derived(PATHS[name] ?? PATHS.dot);
